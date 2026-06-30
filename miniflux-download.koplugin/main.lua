@@ -49,6 +49,17 @@ local id_postfix = "] "
 -- Seconds before a result/summary popup auto-dismisses.
 local RESULT_TIMEOUT = 5
 
+-- Translated message for a known API error keyword, or nil for anything else
+-- (so callers can supply their own context-specific fallback wording).
+local function apiErrorMessage(result)
+    if result == "unauthorized" then
+        return _("Authentication failed. Please check your API token.")
+    elseif result == "network_error" then
+        return _("Could not connect to the Miniflux server.\nCheck the server URL and your network.")
+    end
+    return nil
+end
+
 local Miniflux = WidgetContainer:extend{
     name = "miniflux_download",
     settings_file = DataStorage:getSettingsDir() .. "/miniflux_download.lua",
@@ -294,6 +305,12 @@ Create an API token in the Miniflux web interface under Settings > API Keys.]])
                     end,
                 },
                 {
+                    text = _("Test"),
+                    callback = function()
+                        self:testConnection()
+                    end,
+                },
+                {
                     text = _("Apply"),
                     callback = function()
                         local fields = self.settings_dialog:getFields()
@@ -323,6 +340,40 @@ Create an API token in the Miniflux web interface under Settings > API Keys.]])
     }
     UIManager:show(self.settings_dialog)
     self.settings_dialog:onShowKeyboard()
+end
+
+-- Validate the URL/token currently typed in the settings dialog by calling
+-- GET /v1/me on the server, and report the result.
+function Miniflux:testConnection()
+    local fields = self.settings_dialog:getFields()
+    local url = fields[1]:gsub("/*$", "") -- strip trailing slashes
+    local token = fields[2]
+    if url == "" or token == "" then
+        UIManager:show(InfoMessage:new{
+            text = _("Please enter both the server URL and an API token first."),
+        })
+        return
+    end
+    NetworkMgr:runWhenOnline(function()
+        Trapper:wrap(function()
+            Trapper:info(_("Testing connection to Miniflux…"))
+            local ok, result = MinifluxApi:new(url, token):getMe()
+            Trapper:reset()
+            local msg
+            if ok and type(result) == "table" then
+                local who = result.username or result.email
+                if who and who ~= "" then
+                    msg = T(_("Connection successful. Logged in as %1."), who)
+                else
+                    msg = _("Connection successful.")
+                end
+            else
+                msg = apiErrorMessage(result)
+                    or _("Connection failed. Please check the server URL and API token.")
+            end
+            UIManager:show(InfoMessage:new{ text = msg, timeout = RESULT_TIMEOUT })
+        end)
+    end)
 end
 
 function Miniflux:setDownloadDirectory(touchmenu_instance)
@@ -361,6 +412,11 @@ end
 -------------------------------------------------------------------------------
 -- Download flow
 -------------------------------------------------------------------------------
+
+-- An API client configured from the saved settings.
+function Miniflux:getApi()
+    return MinifluxApi:new(self.server_url, self.api_token)
+end
 
 -- Make sure the server URL, token and a valid download folder are configured.
 -- Returns true when everything is in order, false otherwise (and shows a dialog).
@@ -496,7 +552,7 @@ function Miniflux:uploadReadStatuses(quiet)
     for id, path in pairs(self:getLocalEntries()) do
         if self:isEntryRead(path) then
             table.insert(read_ids, id)
-            read_paths[#read_ids] = path
+            table.insert(read_paths, path)
         end
     end
 
@@ -511,7 +567,7 @@ function Miniflux:uploadReadStatuses(quiet)
     end
 
     Trapper:info(_("Marking finished articles as read on the server…"))
-    local api = MinifluxApi:new(self.server_url, self.api_token)
+    local api = self:getApi()
     local ok = api:updateEntriesStatus(read_ids, "read")
     if not ok then
         logger.warn("Miniflux: failed to upload read statuses")
@@ -555,7 +611,7 @@ function Miniflux:deleteRemotelyReadArticles(known_unread_ids)
         return 0
     end
 
-    local api = MinifluxApi:new(self.server_url, self.api_token)
+    local api = self:getApi()
     local deleted = 0
     local index = 0
     for id, path in pairs(candidates) do
@@ -642,7 +698,7 @@ function Miniflux:downloadEntries()
 
     Trapper:info(_("Connecting to Miniflux…"))
 
-    local api = MinifluxApi:new(self.server_url, self.api_token)
+    local api = self:getApi()
     local ok, result, code = api:getEntries{
         status = "unread",
         limit = self.limit,
@@ -652,14 +708,8 @@ function Miniflux:downloadEntries()
 
     if not ok then
         Trapper:reset()
-        local msg
-        if result == "unauthorized" then
-            msg = _("Authentication failed. Please check your API token.")
-        elseif result == "network_error" then
-            msg = _("Could not connect to the Miniflux server.\nCheck the server URL and your network.")
-        else
-            msg = T(_("Failed to fetch articles from Miniflux. (%1)"), tostring(code or result))
-        end
+        local msg = apiErrorMessage(result)
+            or T(_("Failed to fetch articles from Miniflux. (%1)"), tostring(code or result))
         UIManager:show(InfoMessage:new{ text = msg })
         return
     end
@@ -680,6 +730,7 @@ function Miniflux:downloadEntries()
     local new_count = 0
     local skipped_count = 0
     local failed_count = 0
+    local cancelled = false
 
     for index, entry in ipairs(entries) do
         local message = T(_("Article %1 / %2:\n%3"), index, total,
@@ -690,13 +741,18 @@ function Miniflux:downloadEntries()
         else
             local epub_path = self:getEntryPath(entry)
             local html = buildArticleHtml(entry)
-            local created = false
+            local created, reason
             local create_ok, create_err = pcall(function()
-                created = MinifluxEpub:createEpub(epub_path, html, entry.url or self.server_url,
-                    self.include_images, message)
+                created, reason = MinifluxEpub:createEpub(epub_path, html,
+                    entry.url or self.server_url, self.include_images, message)
             end)
             if create_ok and created then
                 new_count = new_count + 1
+            elseif create_ok and reason == "cancelled" then
+                -- User interrupted: stop the whole batch rather than moving on
+                -- to (and downloading) the next article.
+                cancelled = true
+                break
             else
                 failed_count = failed_count + 1
                 logger.warn("Miniflux: failed to create EPUB for entry", entry.id, create_err)
@@ -708,6 +764,9 @@ function Miniflux:downloadEntries()
 
     local lines = {}
     table.insert(lines, T(N_("Downloaded %1 article.", "Downloaded %1 articles.", new_count), new_count))
+    if cancelled then
+        table.insert(lines, _("Download interrupted."))
+    end
     if skipped_count > 0 then
         table.insert(lines, T(_("Skipped %1 already downloaded."), skipped_count))
     end

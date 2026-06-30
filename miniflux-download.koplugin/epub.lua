@@ -16,6 +16,7 @@ local socket = require("socket")
 local socket_url = require("socket.url")
 local socketutil = require("socketutil")
 local time = require("ui/time")
+local util = require("util")
 local _ = require("gettext")
 local T = ffiutil.template
 
@@ -35,22 +36,11 @@ local ext_to_mimetype = {
     tiff = "image/tiff",
 }
 
--- Percent-encode only characters that are invalid in a URL path (e.g. spaces),
--- leaving RFC 3986 path-safe characters, "/" separators and existing "%XX"
--- escapes untouched. We deliberately avoid util.urlEncode here: on some KOReader
--- builds its "keep these chars" argument is ignored, so it re-encodes "/" into
--- "%2F" (and "%" into "%25"). That corrupts the authority — the first "/" after
--- the host becomes part of a bogus hostname — and name resolution then fails
--- with "host or service not provided". Observed on Substack CDN image URLs.
-local function encodePathChars(path)
-    return (path:gsub("[^%w%-._~/%%:@!$&'()*+,;=]", function(c)
-        return string.format("%%%02X", c:byte())
-    end))
-end
-
 -- Download the raw bytes of a remote URL (used for article images).
 -- Images on a Miniflux feed are public URLs, so no auth header is needed.
-local function getUrlContent(url, timeout, maxtime)
+local IMAGE_BLOCK_TIMEOUT = 10
+local IMAGE_TOTAL_TIMEOUT = 60
+local function getUrlContent(url)
     local parsed_url = socket_url.parse(url)
     if not parsed_url then
         logger.warn("MinifluxEpub: invalid image URL:", url)
@@ -58,16 +48,19 @@ local function getUrlContent(url, timeout, maxtime)
     end
     local path = parsed_url.path
     if path then
-        parsed_url.path = encodePathChars(path)
+        -- Percent-encode invalid path characters (e.g. spaces) while preserving
+        -- "/" separators and "%" (so existing "%XX" escapes are not double-
+        -- encoded). Mirrors KOReader's newsdownloader plugin.
+        parsed_url.path = util.urlEncode(path, "/%%")
         url = socket_url.build(parsed_url)
     end
 
     local sink = {}
-    socketutil:set_timeout(timeout or 10, maxtime or 60)
+    socketutil:set_timeout(IMAGE_BLOCK_TIMEOUT, IMAGE_TOTAL_TIMEOUT)
     local request = {
         url    = url,
         method = "GET",
-        sink   = maxtime and socketutil.table_sink(sink) or ltn12.sink.table(sink),
+        sink   = ltn12.sink.table(sink),
     }
     local code, headers, status = socket.skip(1, http.request(request))
     socketutil:reset_timeout()
@@ -401,10 +394,18 @@ function MinifluxEpub:createEpub(epub_path, html, url, include_images, message)
         if lfs.attributes(epub_path_tmp, "mode") == "file" then
             os.remove(epub_path_tmp)
         end
-        return false
+        -- Signal a user cancellation distinctly from a failure, so the caller
+        -- can stop the whole batch instead of moving on to the next article.
+        return false, "cancelled"
     end
 
-    os.rename(epub_path_tmp, epub_path)
+    if not os.rename(epub_path_tmp, epub_path) then
+        logger.warn("MinifluxEpub: failed to rename", epub_path_tmp, "to", epub_path)
+        if lfs.attributes(epub_path_tmp, "mode") == "file" then
+            os.remove(epub_path_tmp)
+        end
+        return false
+    end
     logger.dbg("MinifluxEpub: successfully created", epub_path)
 
     collectgarbage()
