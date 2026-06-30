@@ -16,7 +16,6 @@ local socket = require("socket")
 local socket_url = require("socket.url")
 local socketutil = require("socketutil")
 local time = require("ui/time")
-local util = require("util")
 local _ = require("gettext")
 local T = ffiutil.template
 
@@ -36,17 +35,30 @@ local ext_to_mimetype = {
     tiff = "image/tiff",
 }
 
+-- Percent-encode only characters that are invalid in a URL path (e.g. spaces),
+-- leaving RFC 3986 path-safe characters, "/" separators and existing "%XX"
+-- escapes untouched. We deliberately avoid util.urlEncode here: on some KOReader
+-- builds its "keep these chars" argument is ignored, so it re-encodes "/" into
+-- "%2F" (and "%" into "%25"). That corrupts the authority — the first "/" after
+-- the host becomes part of a bogus hostname — and name resolution then fails
+-- with "host or service not provided". Observed on Substack CDN image URLs.
+local function encodePathChars(path)
+    return (path:gsub("[^%w%-._~/%%:@!$&'()*+,;=]", function(c)
+        return string.format("%%%02X", c:byte())
+    end))
+end
+
 -- Download the raw bytes of a remote URL (used for article images).
 -- Images on a Miniflux feed are public URLs, so no auth header is needed.
 local function getUrlContent(url, timeout, maxtime)
     local parsed_url = socket_url.parse(url)
     if not parsed_url then
+        logger.warn("MinifluxEpub: invalid image URL:", url)
         return false, "Invalid URL"
     end
     local path = parsed_url.path
     if path then
-        -- Encode invalid path chars (e.g. spaces) while preserving "/" and "%".
-        parsed_url.path = util.urlEncode(path, "/%%")
+        parsed_url.path = encodePathChars(path)
         url = socket_url.build(parsed_url)
     end
 
@@ -60,6 +72,16 @@ local function getUrlContent(url, timeout, maxtime)
     local code, headers, status = socket.skip(1, http.request(request))
     socketutil:reset_timeout()
     local content = table.concat(sink)
+
+    -- Diagnostic trace: what was actually requested and what came back.
+    logger.dbg("MinifluxEpub: GET", url,
+        "-> code:", code,
+        "status:", status,
+        "content-type:", headers and headers["content-type"],
+        "content-length:", headers and headers["content-length"],
+        "content-encoding:", headers and headers["content-encoding"],
+        "location:", headers and headers["location"],
+        "received:", #content, "bytes")
 
     if code == socketutil.TIMEOUT_CODE or
        code == socketutil.SSL_HANDSHAKE_CODE or
@@ -75,6 +97,8 @@ local function getUrlContent(url, timeout, maxtime)
     if headers and headers["content-length"] then
         local content_length = tonumber(headers["content-length"])
         if #content ~= content_length then
+            logger.warn("MinifluxEpub: incomplete content for", url,
+                "expected", content_length, "got", #content)
             return false, "Incomplete content received"
         end
     end
@@ -123,8 +147,10 @@ function MinifluxEpub:createEpub(epub_path, html, url, include_images, message)
     local seen_images = {}
     local imagenum = 1
     local cover_imgid = nil
+    local matched_tags = 0
 
     local processImg = function(img_tag)
+        matched_tags = matched_tags + 1
         local src = img_tag:match([[src="([^"]*)"]])
         if src == nil or src == "" then
             logger.dbg("MinifluxEpub: no src found in", img_tag)
@@ -201,7 +227,14 @@ function MinifluxEpub:createEpub(epub_path, html, url, include_images, message)
     end
 
     if include_images then
+        -- Count raw <img occurrences (case-insensitive) to compare against the
+        -- number actually matched by our pattern: a gap means tags we failed to
+        -- extract (e.g. lazy-loaded data-src, single-quoted src, uppercase IMG).
+        local raw_img_tags = select(2, html:gsub("<%s*[Ii][Mm][Gg][%s/>]", ""))
         html = html:gsub("(<%s*img [^>]*>)", processImg)
+        logger.dbg("MinifluxEpub: <img> tags raw:", raw_img_tags,
+            "matched by pattern:", matched_tags,
+            "unique images queued:", #images)
     else
         -- Remove img tags to avoid little blank squares of missing images.
         html = html:gsub("<%s*img [^>]*>", "")
@@ -338,7 +371,7 @@ function MinifluxEpub:createEpub(epub_path, html, url, include_images, message)
                 end
                 epub:addFileFromMemory("OEBPS/" .. img.imgpath, content, no_compression, mtime)
             else
-                logger.info("MinifluxEpub: failed fetching image:", src)
+                logger.warn("MinifluxEpub: failed fetching image:", src, "reason:", content)
                 go_on = UI:confirm(T(_("Downloading image %1 failed. Continue anyway?"), inum),
                     _("Stop"), _("Continue"))
                 if not go_on then
