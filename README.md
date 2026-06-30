@@ -99,8 +99,24 @@ are left untouched, both locally and on the server.
 - `epub.lua` — builds an EPUB from an article's HTML content, downloading and
   embedding `<img>` resources. Adapted from KOReader's built-in
   `newsdownloader` plugin.
+- `helpers.lua` — pure, host-independent helpers (filename id encoding, XML
+  escaping, article HTML, API error messages), kept separate so they can be
+  unit-tested outside KOReader.
 - `main.lua` — settings, menus and the download orchestration, modelled on
   KOReader's built-in `wallabag` plugin.
+
+## Development
+
+Tooling is managed with [mise](https://mise.jdx.dev/):
+
+- `mise run test` — run the unit tests ([busted](https://lunarmodules.github.io/busted/)).
+  The tests cover the host-independent logic (`api.lua`, `helpers.lua`) by
+  stubbing the KOReader modules; UI/network flows are still verified manually.
+- `mise run lint` — lint with [luacheck](https://github.com/lunarmodules/luacheck).
+- `mise run sync` — rsync the plugin to a mounted e-reader.
+
+Install the pre-commit hook with [`prek`](https://github.com/j178/prek)
+(`prek install`) to run the linter and tests automatically before each commit.
 
 ## License
 

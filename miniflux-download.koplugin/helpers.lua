@@ -1,0 +1,97 @@
+--[[--
+Pure helper functions, with no dependency on the KOReader host application
+beyond gettext. Kept in a separate module so they can be unit-tested with
+busted outside of KOReader (see spec/).
+
+The Miniflux entry id is encoded in the downloaded file name, e.g.
+"[mf-id_1234] Some article title.epub". This lets the plugin detect
+already-downloaded entries and reconcile read statuses on later syncs. Both
+ends of that scheme (building and parsing the name) live here, so they cannot
+drift apart.
+--]]
+
+local _ = require("gettext")
+
+local Helpers = {}
+
+-- Prefix/postfix framing the entry id in a downloaded file name.
+Helpers.id_prefix = "[mf-id_"
+Helpers.id_postfix = "] "
+
+-- Translated message for a known API error keyword, or nil for anything else
+-- (so callers can supply their own context-specific fallback wording).
+function Helpers.apiErrorMessage(result)
+    if result == "unauthorized" then
+        return _("Authentication failed. Please check your API token.")
+    elseif result == "network_error" then
+        return _("Could not connect to the Miniflux server.\nCheck the server URL and your network.")
+    end
+    return nil
+end
+
+-- Extract the Miniflux entry id encoded in a file name, or nil.
+function Helpers.entryIdFromFilename(filename)
+    local id = filename:match("^%[mf%-id_(%d+)%]")
+    return id and tonumber(id) or nil
+end
+
+-- Build the downloaded file name for an entry from its id and a (host-sanitised)
+-- title. Inverse of entryIdFromFilename for the id part.
+function Helpers.entryFilename(id, safe_title)
+    return Helpers.id_prefix .. id .. Helpers.id_postfix .. safe_title .. ".epub"
+end
+
+-- Escape a plain-text string for safe inclusion in XML/XHTML.
+function Helpers.xmlEscape(s)
+    if not s then
+        return ""
+    end
+    return (s:gsub("[&<>\"]", {
+        ["&"] = "&amp;",
+        ["<"] = "&lt;",
+        [">"] = "&gt;",
+        ['"'] = "&quot;",
+    }))
+end
+
+-- Assemble a full HTML document for a single Miniflux entry.
+function Helpers.buildArticleHtml(entry)
+    local xmlEscape = Helpers.xmlEscape
+    local title = xmlEscape(entry.title or _("Untitled"))
+
+    local byline_parts = {}
+    if entry.author and entry.author ~= "" then
+        table.insert(byline_parts, xmlEscape(entry.author))
+    end
+    if entry.feed and entry.feed.title and entry.feed.title ~= "" then
+        table.insert(byline_parts, xmlEscape(entry.feed.title))
+    end
+    if type(entry.published_at) == "string" then
+        table.insert(byline_parts, xmlEscape(entry.published_at:sub(1, 10)))
+    end
+    local byline = table.concat(byline_parts, " · ")
+
+    local content = entry.content or ""
+    local source_url = entry.url or ""
+    local footer = ""
+    if source_url ~= "" then
+        footer = string.format([[<hr/><p><a href="%s">%s</a></p>]],
+            xmlEscape(source_url), xmlEscape(source_url))
+    end
+
+    return string.format([[<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8"/>
+<title>%s</title>
+</head>
+<body>
+<h1>%s</h1>
+<p><em>%s</em></p>
+<article>%s</article>
+%s
+</body>
+</html>]], title, title, byline, content, footer)
+end
+
+return Helpers

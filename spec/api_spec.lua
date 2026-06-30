@@ -1,0 +1,118 @@
+require("spec_helper")
+local MinifluxApi = require("api")
+local http = require("socket.http")
+local json = require("json")
+
+describe("MinifluxApi", function()
+    local api
+    before_each(function()
+        http.reset()
+        api = MinifluxApi:new("https://miniflux.example.org", "tok123")
+    end)
+
+    describe(":new", function()
+        it("stores the server url and token", function()
+            assert.equals("https://miniflux.example.org", api.server_url)
+            assert.equals("tok123", api.token)
+        end)
+        it("wires methods through the metatable", function()
+            assert.is_function(api.getMe)
+        end)
+    end)
+
+    describe(":request", function()
+        it("builds the url and auth headers", function()
+            http.response = { code = 200, body = json.encode({ ok = true }) }
+            api:request("GET", "/v1/me")
+            assert.equals("https://miniflux.example.org/v1/me", http.last_request.url)
+            assert.equals("GET", http.last_request.method)
+            assert.equals("tok123", http.last_request.headers["X-Auth-Token"])
+            assert.equals("application/json", http.last_request.headers["Accept"])
+        end)
+        it("json-encodes a body and sets the content headers", function()
+            http.response = { code = 204 }
+            api:request("PUT", "/v1/entries", { entry_ids = { 1, 2 }, status = "read" })
+            local sent = json.decode(http.last_body)
+            assert.same({ 1, 2 }, sent.entry_ids)
+            assert.equals("read", sent.status)
+            assert.equals("application/json", http.last_request.headers["Content-Type"])
+            assert.equals(tostring(#http.last_body), http.last_request.headers["Content-Length"])
+        end)
+        it("returns the decoded body on 200", function()
+            http.response = { code = 200, body = json.encode({ username = "alice" }) }
+            local ok, result = api:request("GET", "/v1/me")
+            assert.is_true(ok)
+            assert.equals("alice", result.username)
+        end)
+        it("returns an empty table on 204", function()
+            http.response = { code = 204 }
+            local ok, result = api:request("PUT", "/v1/entries")
+            assert.is_true(ok)
+            assert.same({}, result)
+        end)
+        it("maps 401 to unauthorized", function()
+            http.response = { code = 401 }
+            local ok, errkw, code = api:request("GET", "/v1/me")
+            assert.is_false(ok)
+            assert.equals("unauthorized", errkw)
+            assert.equals(401, code)
+        end)
+        it("maps a network failure to network_error", function()
+            http.response = { network_error = true }
+            local ok, errkw = api:request("GET", "/v1/me")
+            assert.is_false(ok)
+            assert.equals("network_error", errkw)
+        end)
+        it("maps invalid JSON to json_error", function()
+            http.response = { code = 200, body = "not json {{{" }
+            local ok, errkw = api:request("GET", "/v1/me")
+            assert.is_false(ok)
+            assert.equals("json_error", errkw)
+        end)
+        it("maps other HTTP errors to http_error with the code", function()
+            http.response = { code = 500 }
+            local ok, errkw, code = api:request("GET", "/v1/me")
+            assert.is_false(ok)
+            assert.equals("http_error", errkw)
+            assert.equals(500, code)
+        end)
+    end)
+
+    describe(":getEntries", function()
+        it("applies the default query parameters", function()
+            http.response = { code = 200, body = json.encode({ entries = {} }) }
+            api:getEntries()
+            assert.equals(
+                "https://miniflux.example.org/v1/entries?status=unread&order=published_at&direction=desc",
+                http.last_request.url)
+        end)
+        it("appends limit and offset when given", function()
+            http.response = { code = 200, body = json.encode({ entries = {} }) }
+            api:getEntries({ status = "read", limit = 10, offset = 20 })
+            local url = http.last_request.url
+            assert.is_truthy(url:find("status=read", 1, true))
+            assert.is_truthy(url:find("limit=10", 1, true))
+            assert.is_truthy(url:find("offset=20", 1, true))
+        end)
+    end)
+
+    describe(":getEntry", function()
+        it("targets the single-entry endpoint", function()
+            http.response = { code = 200, body = json.encode({ id = 5 }) }
+            api:getEntry(5)
+            assert.equals("https://miniflux.example.org/v1/entries/5", http.last_request.url)
+        end)
+    end)
+
+    describe(":updateEntriesStatus", function()
+        it("PUTs the ids and the status", function()
+            http.response = { code = 204 }
+            api:updateEntriesStatus({ 3, 4 }, "read")
+            assert.equals("PUT", http.last_request.method)
+            assert.equals("https://miniflux.example.org/v1/entries", http.last_request.url)
+            local sent = json.decode(http.last_body)
+            assert.same({ 3, 4 }, sent.entry_ids)
+            assert.equals("read", sent.status)
+        end)
+    end)
+end)

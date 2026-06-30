@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Vérifie le code avec luacheck"
+set -euo pipefail
+
+luacheck miniflux-download.koplugin/ spec/

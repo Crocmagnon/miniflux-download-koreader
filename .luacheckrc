@@ -15,3 +15,8 @@ ignore = {
     "631",     -- Line is too long
     "dummy",
 }
+
+-- Test files use busted's globals (describe/it/assert/before_each/…).
+files["spec/"] = {
+    std = "+busted",
+}

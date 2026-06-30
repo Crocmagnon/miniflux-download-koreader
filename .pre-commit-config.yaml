@@ -1,0 +1,17 @@
+# Hooks pre-commit (exécutés avec `prek`).
+# Installer : prek install
+repos:
+  - repo: local
+    hooks:
+      - id: lint
+        name: luacheck
+        entry: mise run lint
+        language: system
+        pass_filenames: false
+        files: \.lua$
+      - id: tests
+        name: busted tests
+        entry: mise run test
+        language: system
+        pass_filenames: false
+        files: \.lua$

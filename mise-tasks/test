@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Lance les tests unitaires (busted)"
+set -euo pipefail
+
+busted spec/

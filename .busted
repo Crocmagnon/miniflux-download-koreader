@@ -1,0 +1,9 @@
+-- busted configuration. lpath makes the plugin sources, the spec helper and the
+-- mock host modules requireable from the repo root (where the `test` task runs).
+return {
+    default = {
+        lpath = "./spec/?.lua;./spec/mock/?.lua;./miniflux-download.koplugin/?.lua;",
+        ROOT = { "spec" },
+        pattern = "_spec",
+    },
+}

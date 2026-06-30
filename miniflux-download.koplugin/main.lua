@@ -39,26 +39,10 @@ local T = ffiUtil.template
 
 local MinifluxApi = require("api")
 local MinifluxEpub = require("epub")
-
--- Prefix used in downloaded file names to store the Miniflux entry id, e.g.
--- "[mf-id_1234] Some article title.epub". Lets us detect already-downloaded
--- entries on subsequent syncs.
-local id_prefix = "[mf-id_"
-local id_postfix = "] "
+local Helpers = require("helpers")
 
 -- Seconds before a result/summary popup auto-dismisses.
 local RESULT_TIMEOUT = 5
-
--- Translated message for a known API error keyword, or nil for anything else
--- (so callers can supply their own context-specific fallback wording).
-local function apiErrorMessage(result)
-    if result == "unauthorized" then
-        return _("Authentication failed. Please check your API token.")
-    elseif result == "network_error" then
-        return _("Could not connect to the Miniflux server.\nCheck the server URL and your network.")
-    end
-    return nil
-end
 
 local Miniflux = WidgetContainer:extend{
     name = "miniflux_download",
@@ -368,7 +352,7 @@ function Miniflux:testConnection()
                     msg = _("Connection successful.")
                 end
             else
-                msg = apiErrorMessage(result)
+                msg = Helpers.apiErrorMessage(result)
                     or _("Connection failed. Please check the server URL and API token.")
             end
             UIManager:show(InfoMessage:new{ text = msg, timeout = RESULT_TIMEOUT })
@@ -495,12 +479,6 @@ function Miniflux:onUploadMinifluxDownloadStatuses()
     return true
 end
 
--- Extract the Miniflux entry id encoded in a file name, or nil.
-local function entryIdFromFilename(filename)
-    local id = filename:match("^%[mf%-id_(%d+)%]")
-    return id and tonumber(id) or nil
-end
-
 -- Build a map of entry id -> local EPUB path for everything already downloaded
 -- (recursively, skipping .sdr sidecar folders).
 function Miniflux:getLocalEntries(dir, map)
@@ -514,7 +492,7 @@ function Miniflux:getLocalEntries(dir, map)
             local entry_path = ffiUtil.joinPath(dir, entry)
             local mode = lfs.attributes(entry_path, "mode")
             if mode == "file" then
-                local id = entryIdFromFilename(entry)
+                local id = Helpers.entryIdFromFilename(entry)
                 if id then
                     map[id] = entry_path
                 end
@@ -631,63 +609,11 @@ function Miniflux:deleteRemotelyReadArticles(known_unread_ids)
     return deleted
 end
 
--- Escape a plain-text string for safe inclusion in XML/XHTML.
-local function xmlEscape(s)
-    if not s then
-        return ""
-    end
-    return (s:gsub("[&<>\"]", {
-        ["&"] = "&amp;",
-        ["<"] = "&lt;",
-        [">"] = "&gt;",
-        ['"'] = "&quot;",
-    }))
-end
-
--- Assemble a full HTML document for a single Miniflux entry.
-local function buildArticleHtml(entry)
-    local title = xmlEscape(entry.title or _("Untitled"))
-
-    local byline_parts = {}
-    if entry.author and entry.author ~= "" then
-        table.insert(byline_parts, xmlEscape(entry.author))
-    end
-    if entry.feed and entry.feed.title and entry.feed.title ~= "" then
-        table.insert(byline_parts, xmlEscape(entry.feed.title))
-    end
-    if type(entry.published_at) == "string" then
-        table.insert(byline_parts, xmlEscape(entry.published_at:sub(1, 10)))
-    end
-    local byline = table.concat(byline_parts, " · ")
-
-    local content = entry.content or ""
-    local source_url = entry.url or ""
-    local footer = ""
-    if source_url ~= "" then
-        footer = string.format([[<hr/><p><a href="%s">%s</a></p>]],
-            xmlEscape(source_url), xmlEscape(source_url))
-    end
-
-    return string.format([[<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8"/>
-<title>%s</title>
-</head>
-<body>
-<h1>%s</h1>
-<p><em>%s</em></p>
-<article>%s</article>
-%s
-</body>
-</html>]], title, title, byline, content, footer)
-end
-
 -- Compute the local EPUB path for an entry.
 function Miniflux:getEntryPath(entry)
     local safe_title = util.getSafeFilename(entry.title or ("entry_" .. entry.id),
         self.download_dir, 200, 0)
-    local filename = id_prefix .. entry.id .. id_postfix .. safe_title .. ".epub"
+    local filename = Helpers.entryFilename(entry.id, safe_title)
     return ffiUtil.joinPath(self.download_dir, filename)
 end
 
@@ -708,7 +634,7 @@ function Miniflux:downloadEntries()
 
     if not ok then
         Trapper:reset()
-        local msg = apiErrorMessage(result)
+        local msg = Helpers.apiErrorMessage(result)
             or T(_("Failed to fetch articles from Miniflux. (%1)"), tostring(code or result))
         UIManager:show(InfoMessage:new{ text = msg })
         return
@@ -740,7 +666,7 @@ function Miniflux:downloadEntries()
             skipped_count = skipped_count + 1
         else
             local epub_path = self:getEntryPath(entry)
-            local html = buildArticleHtml(entry)
+            local html = Helpers.buildArticleHtml(entry)
             local created, reason
             local create_ok, create_err = pcall(function()
                 created, reason = MinifluxEpub:createEpub(epub_path, html,
