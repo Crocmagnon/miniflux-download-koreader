@@ -687,16 +687,19 @@ end
 -- Self-update
 -------------------------------------------------------------------------------
 
--- Human-readable installed version, from the CI-stamped fields in _meta.lua.
+-- Human-readable installed version. KOReader's PluginLoader copies the fields
+-- of the installed _meta.lua onto the plugin instance, so self.version /
+-- self.built_at hold the CI-stamped values. (require("_meta") must NOT be used:
+-- every plugin's _meta.lua shares the module name "_meta", so it resolves to
+-- whichever plugin was loaded first, not ours.)
 function Miniflux:versionString()
-    local meta = require("_meta")
-    if not meta.version or meta.version == "dev" then
+    if not self.version or self.version == "dev" then
         return _("Development version (installed from source)")
     end
-    if type(meta.built_at) == "string" and meta.built_at ~= "" then
-        return T(_("Version %1 (built %2)"), meta.version, meta.built_at:sub(1, 10))
+    if type(self.built_at) == "string" and self.built_at ~= "" then
+        return T(_("Version %1 (built %2)"), self.version, self.built_at:sub(1, 10))
     end
-    return T(_("Version %1"), meta.version)
+    return T(_("Version %1"), self.version)
 end
 
 -- Translated message for an updater reason keyword (see updater.lua).
@@ -709,12 +712,13 @@ local UPDATER_MESSAGES = {
 }
 
 -- Build the updater, stamped with the installed version so it can tell whether a
--- release is newer. Required lazily so the core flow never depends on it.
+-- release is newer. self.version / self.built_at come from the installed
+-- _meta.lua (merged onto the instance by KOReader's PluginLoader). Required
+-- lazily so the core flow never depends on it.
 function Miniflux:getUpdater()
-    local meta = require("_meta")
     return require("updater"):new{
-        local_version = meta.version,
-        local_built_at = meta.built_at,
+        local_version = self.version,
+        local_built_at = self.built_at,
     }
 end
 
