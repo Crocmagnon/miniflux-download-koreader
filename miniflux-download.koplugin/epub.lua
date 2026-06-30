@@ -129,7 +129,7 @@ function MinifluxEpub:createEpub(epub_path, html, url, include_images, message)
     local base_url = socket_url.parse(url)
 
     local cancelled = false
-    local page_htmltitle = html:match([[<title[^>]*>(.-)</title>]])
+    local page_htmltitle = html:match([[<title[^>]*>(.-)</title>]]) or _("Untitled")
 
     -- Rejigger HTML into XHTML to avoid unclosed elements.
     local cre = require("libs/libkoreader-cre")
@@ -358,11 +358,13 @@ function MinifluxEpub:createEpub(epub_path, html, url, include_images, message)
             local src = img.src
             local success, content = getUrlContent(src)
             if success then
-                local no_compression = true
-                if img.mimetype == "image/svg+xml" then
-                    no_compression = false -- SVG is XML text, worth compressing
-                end
-                epub:addFileFromMemory("OEBPS/" .. img.imgpath, content, no_compression, mtime)
+                -- Store binary images uncompressed (they are already
+                -- compressed); SVG is XML text, so deflate is worthwhile.
+                -- Compression is selected via setZipCompression, not an
+                -- argument to addFileFromMemory (which is path, content, mtime).
+                epub:setZipCompression(img.mimetype == "image/svg+xml"
+                    and "deflate" or "store")
+                epub:addFileFromMemory("OEBPS/" .. img.imgpath, content, mtime)
             else
                 logger.warn("MinifluxEpub: failed fetching image:", src, "reason:", content)
                 go_on = UI:confirm(T(_("Downloading image %1 failed. Continue anyway?"), inum),

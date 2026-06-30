@@ -94,6 +94,13 @@ describe("MinifluxApi", function()
             assert.is_truthy(url:find("limit=10", 1, true))
             assert.is_truthy(url:find("offset=20", 1, true))
         end)
+        it("omits limit and offset when not given", function()
+            http.response = { code = 200, body = json.encode({ entries = {} }) }
+            api:getEntries()
+            local url = http.last_request.url
+            assert.is_nil(url:find("limit=", 1, true))
+            assert.is_nil(url:find("offset=", 1, true))
+        end)
     end)
 
     describe(":getEntry", function()
@@ -101,6 +108,13 @@ describe("MinifluxApi", function()
             http.response = { code = 200, body = json.encode({ id = 5 }) }
             api:getEntry(5)
             assert.equals("https://miniflux.example.org/v1/entries/5", http.last_request.url)
+        end)
+        it("passes through a 404 so callers can treat the entry as removed", function()
+            http.response = { code = 404 }
+            local ok, errkw, code = api:getEntry(5)
+            assert.is_false(ok)
+            assert.equals("http_error", errkw)
+            assert.equals(404, code)
         end)
     end)
 

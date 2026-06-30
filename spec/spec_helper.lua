@@ -12,6 +12,18 @@ package.preload["gettext"] = function()
     }, { __call = function(_, msgid) return msgid end })
 end
 
+-- ffi/util: only `template` is used (KOReader's %1/%2 interpolation helper).
+package.preload["ffi/util"] = function()
+    return {
+        template = function(str, ...)
+            local params = { ... }
+            return (str:gsub("%%(%d+)", function(n)
+                return tostring(params[tonumber(n)])
+            end))
+        end,
+    }
+end
+
 -- logger: discard everything.
 package.preload["logger"] = function()
     local noop = function() end

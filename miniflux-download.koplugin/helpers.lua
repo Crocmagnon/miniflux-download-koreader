@@ -1,7 +1,7 @@
 --[[--
 Pure helper functions, with no dependency on the KOReader host application
-beyond gettext. Kept in a separate module so they can be unit-tested with
-busted outside of KOReader (see spec/).
+beyond gettext and ffi/util's `template` (interpolation). Kept in a separate
+module so they can be unit-tested with busted outside of KOReader (see spec/).
 
 The Miniflux entry id is encoded in the downloaded file name, e.g.
 "[mf-id_1234] Some article title.epub". This lets the plugin detect
@@ -10,9 +10,48 @@ ends of that scheme (building and parsing the name) live here, so they cannot
 drift apart.
 --]]
 
+local ffiutil = require("ffi/util")
 local _ = require("gettext")
+local N_ = _.ngettext
+local T = ffiutil.template
 
 local Helpers = {}
+
+-- Read a boolean setting that defaults to true when it has never been set.
+-- Takes the raw value returned by LuaSettings:readSetting so it stays pure.
+function Helpers.defaultTrue(value)
+    return value == nil or value
+end
+
+-- Build the lines of a download/sync result summary from the counters.
+-- `downloaded` is included whenever present (even at 0); the other counts are
+-- omitted when nil or <= 0. Returns an array of strings (possibly empty), which
+-- the caller joins with "\n" and may extend with a context-specific fallback.
+function Helpers.buildResultLines(c)
+    local lines = {}
+    if c.downloaded ~= nil then
+        table.insert(lines, T(N_("Downloaded %1 article.",
+                                 "Downloaded %1 articles.", c.downloaded), c.downloaded))
+    end
+    if c.cancelled then
+        table.insert(lines, _("Download interrupted."))
+    end
+    if c.skipped and c.skipped > 0 then
+        table.insert(lines, T(_("Skipped %1 already downloaded."), c.skipped))
+    end
+    if c.failed and c.failed > 0 then
+        table.insert(lines, T(_("Failed: %1."), c.failed))
+    end
+    if c.marked and c.marked > 0 then
+        table.insert(lines, T(N_("Marked %1 article as read on the server.",
+                                 "Marked %1 articles as read on the server.", c.marked), c.marked))
+    end
+    if c.removed and c.removed > 0 then
+        table.insert(lines, T(N_("Removed %1 article read on another device.",
+                                 "Removed %1 articles read on another device.", c.removed), c.removed))
+    end
+    return lines
+end
 
 -- Prefix/postfix framing the entry id in a downloaded file name.
 Helpers.id_prefix = "[mf-id_"

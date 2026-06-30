@@ -28,14 +28,13 @@ local SpinWidget = require("ui/widget/spinwidget")
 local Trapper = require("ui/trapper")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
-local ffiUtil = require("ffi/util")
+local ffiutil = require("ffi/util")
 local filemanagerutil = require("apps/filemanager/filemanagerutil")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local util = require("util")
 local _ = require("gettext")
-local N_ = _.ngettext
-local T = ffiUtil.template
+local T = ffiutil.template
 
 local MinifluxApi = require("api")
 local MinifluxEpub = require("epub")
@@ -81,20 +80,16 @@ function Miniflux:readSettings()
     self.download_dir = self.settings:readSetting("download_dir")
         or (DataStorage:getFullDataDir() .. "/miniflux_download/")
     self.limit = self.settings:readSetting("limit") or 25
-    -- Default to true when never set.
-    local inc = self.settings:readSetting("include_images")
-    self.include_images = (inc == nil) or inc
+    -- The following options all default to true when never set:
+    self.include_images = Helpers.defaultTrue(self.settings:readSetting("include_images"))
     -- Mark an article as read on the server once it has been finished in
-    -- KOReader (default on), and, by default, remove the local copy afterwards
-    -- (mirrors the Wallabag plugin behaviour).
-    local sync_read = self.settings:readSetting("sync_read_status")
-    self.sync_read_status = (sync_read == nil) or sync_read
-    local del_after = self.settings:readSetting("delete_after_sync")
-    self.delete_after_sync = (del_after == nil) or del_after
+    -- KOReader, and, by default, remove the local copy afterwards (mirrors the
+    -- Wallabag plugin behaviour).
+    self.sync_read_status = Helpers.defaultTrue(self.settings:readSetting("sync_read_status"))
+    self.delete_after_sync = Helpers.defaultTrue(self.settings:readSetting("delete_after_sync"))
     -- Delete local copies of articles that have been read or removed on the
-    -- server from another device (default on).
-    local del_remote = self.settings:readSetting("delete_remotely_read")
-    self.delete_remotely_read = (del_remote == nil) or del_remote
+    -- server from another device.
+    self.delete_remotely_read = Helpers.defaultTrue(self.settings:readSetting("delete_remotely_read"))
     self.order = self.settings:readSetting("order") or "published_at"
     self.direction = self.settings:readSetting("direction") or "desc"
 end
@@ -457,15 +452,7 @@ function Miniflux:onUploadMinifluxDownloadStatuses()
             local marked = self:uploadReadStatuses(true)
             local removed = self:deleteRemotelyReadArticles()
             Trapper:reset()
-            local lines = {}
-            if marked > 0 then
-                table.insert(lines, T(N_("Marked %1 article as read on the server.",
-                                         "Marked %1 articles as read on the server.", marked), marked))
-            end
-            if removed > 0 then
-                table.insert(lines, T(N_("Removed %1 article read on another device.",
-                                         "Removed %1 articles read on another device.", removed), removed))
-            end
+            local lines = Helpers.buildResultLines{ marked = marked, removed = removed }
             if #lines == 0 then
                 table.insert(lines, _("Read statuses are already in sync."))
             end
@@ -489,7 +476,7 @@ function Miniflux:getLocalEntries(dir, map)
     end
     for entry in lfs.dir(dir) do
         if entry ~= "." and entry ~= ".." then
-            local entry_path = ffiUtil.joinPath(dir, entry)
+            local entry_path = ffiutil.joinPath(dir, entry)
             local mode = lfs.attributes(entry_path, "mode")
             if mode == "file" then
                 local id = Helpers.entryIdFromFilename(entry)
@@ -614,7 +601,7 @@ function Miniflux:getEntryPath(entry)
     local safe_title = util.getSafeFilename(entry.title or ("entry_" .. entry.id),
         self.download_dir, 200, 0)
     local filename = Helpers.entryFilename(entry.id, safe_title)
-    return ffiUtil.joinPath(self.download_dir, filename)
+    return ffiutil.joinPath(self.download_dir, filename)
 end
 
 function Miniflux:downloadEntries()
@@ -688,27 +675,14 @@ function Miniflux:downloadEntries()
 
     Trapper:reset()
 
-    local lines = {}
-    table.insert(lines, T(N_("Downloaded %1 article.", "Downloaded %1 articles.", new_count), new_count))
-    if cancelled then
-        table.insert(lines, _("Download interrupted."))
-    end
-    if skipped_count > 0 then
-        table.insert(lines, T(_("Skipped %1 already downloaded."), skipped_count))
-    end
-    if failed_count > 0 then
-        table.insert(lines, T(_("Failed: %1."), failed_count))
-    end
-    if synced_count > 0 then
-        table.insert(lines, T(N_("Marked %1 finished article as read on the server.",
-                                 "Marked %1 finished articles as read on the server.", synced_count),
-                              synced_count))
-    end
-    if removed_count > 0 then
-        table.insert(lines, T(N_("Removed %1 article read on another device.",
-                                 "Removed %1 articles read on another device.", removed_count),
-                              removed_count))
-    end
+    local lines = Helpers.buildResultLines{
+        downloaded = new_count,
+        cancelled = cancelled,
+        skipped = skipped_count,
+        failed = failed_count,
+        marked = synced_count,
+        removed = removed_count,
+    }
     UIManager:show(InfoMessage:new{
         text = table.concat(lines, "\n"),
         timeout = RESULT_TIMEOUT,
