@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#MISE description="Construit le zip distribuable du plugin (estampillé) dans dist/"
+set -euo pipefail
+
+# Plain bash so the CI can run it with `bash mise-tasks/build` (no mise needed).
+for tool in zip sha256sum; do
+  command -v "$tool" >/dev/null || {
+    echo "Erreur : '$tool' introuvable. Installe-le (ex. paquet 'zip') pour construire le zip." >&2
+    exit 1
+  }
+done
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+PLUGIN_NAME="miniflux-download.koplugin"
+DIST="$ROOT/dist"
+STAGE="$DIST/stage"
+
+# Version / tag / prerelease: from the Forgejo Actions environment when present,
+# otherwise a local snapshot derived from the current commit.
+BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+  TAG="${GITHUB_REF_NAME}"
+  PRERELEASE=false
+else
+  TAG="snapshot-$(git rev-parse --short HEAD)"
+  PRERELEASE=true
+fi
+VERSION="$TAG"
+
+# Stamp a clean copy so the working tree is never modified.
+rm -rf "$STAGE"
+mkdir -p "$STAGE"
+cp -a "$ROOT/$PLUGIN_NAME" "$STAGE/$PLUGIN_NAME"
+sed -i \
+  -e "s/^    version = \"dev\",/    version = \"${VERSION}\",/" \
+  -e "s/^    built_at = nil,/    built_at = \"${BUILT_AT}\",/" \
+  "$STAGE/$PLUGIN_NAME/_meta.lua"
+
+# Build the zip (entries prefixed with the folder name) and its checksum.
+ZIP="$DIST/$PLUGIN_NAME.zip"
+rm -f "$ZIP" "$ZIP.sha256"
+( cd "$STAGE" && zip -r -q "$ZIP" "$PLUGIN_NAME" )
+sha256sum "$ZIP" | cut -d' ' -f1 > "$ZIP.sha256"
+
+# Hand the version info to the release step.
+cat > "$DIST/release.env" <<EOF
+TAG=$TAG
+VERSION=$VERSION
+BUILT_AT=$BUILT_AT
+PRERELEASE=$PRERELEASE
+EOF
+
+echo "Built $ZIP"
+echo "  version=$VERSION built_at=$BUILT_AT prerelease=$PRERELEASE"
+echo "  sha256=$(cat "$ZIP.sha256")"

@@ -23,13 +23,17 @@ can be installed alongside any existing Miniflux plugin without conflict.
 
 ## Installation
 
-1. Locate your KOReader `plugins` directory:
+1. Download `miniflux-download.koplugin.zip` from the latest entry on the
+   [Releases](../../releases) page. Pick the most recent **official** release;
+   the `snapshot-…` entries are marked as *pre-release* and are only meant for
+   testing the latest commit.
+2. Locate your KOReader `plugins` directory:
    - Kobo: `.adds/koreader/plugins/`
    - Kindle: `koreader/plugins/`
    - Desktop / emulator: `koreader/plugins/`
-2. Copy the `miniflux-download.koplugin` directory from this repository into that
-   `plugins` directory.
-3. Restart KOReader.
+3. Unzip the archive into that `plugins` directory — it creates the
+   `miniflux-download.koplugin/` folder for you.
+4. Restart KOReader.
 
 ```
 koreader/plugins/
@@ -37,8 +41,21 @@ koreader/plugins/
     ├── _meta.lua
     ├── api.lua
     ├── epub.lua
-    └── main.lua
+    ├── helpers.lua
+    ├── main.lua
+    └── updater.lua
 ```
+
+## Updating
+
+Once installed, the plugin can update itself. Open **Tools → Miniflux Download →
+Check for updates**: it fetches the latest release from Codeberg and, if a newer
+version is available, offers to download and install it in place (restart
+KOReader afterwards to load it). The currently installed version and build date
+are shown under **About Miniflux Download plugin**.
+
+To also receive the snapshot builds published from every commit, enable
+**Settings → Include pre-releases (snapshots) when updating** (off by default).
 
 ## Setup
 
@@ -99,6 +116,9 @@ are left untouched, both locally and on the server.
 - `helpers.lua` — pure, host-independent helpers (filename id encoding, XML
   escaping, article HTML, API error messages), kept separate so they can be
   unit-tested outside KOReader.
+- `updater.lua` — the self-updater: queries the Codeberg release API, then
+  downloads, verifies and swaps in a new copy of the plugin. Kept isolated from
+  the download flow (lazily loaded, side effects injected) and unit-tested.
 - `main.lua` — settings, menus and the download orchestration, modelled on
   KOReader's built-in `wallabag` plugin.
 

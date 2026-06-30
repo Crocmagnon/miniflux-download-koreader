@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+#MISE description="Publie la release Forgejo depuis dist/ (changelog + assets)"
+set -euo pipefail
+
+# Plain bash so the CI can run it with `bash mise-tasks/release` (no mise needed).
+# Requires the artifacts produced by `build`, plus FORGEJO_TOKEN and FORGEJO_API.
+for tool in curl jq; do
+  command -v "$tool" >/dev/null || {
+    echo "Erreur : '$tool' introuvable. Installe-le pour publier la release." >&2
+    exit 1
+  }
+done
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+PLUGIN_NAME="miniflux-download.koplugin"
+DIST="$ROOT/dist"
+ZIP="$DIST/$PLUGIN_NAME.zip"
+
+if [ ! -f "$DIST/release.env" ] || [ ! -f "$ZIP" ]; then
+  echo "Erreur : artefacts manquants. Lance d'abord 'mise run build'." >&2
+  exit 1
+fi
+# shellcheck disable=SC1091
+. "$DIST/release.env"
+
+: "${FORGEJO_TOKEN:?Définis FORGEJO_TOKEN (token avec accès en écriture au dépôt)}"
+: "${FORGEJO_API:?Définis FORGEJO_API (ex. https://codeberg.org/api/v1/repos/OWNER/REPO)}"
+
+SHA256="$(cat "$ZIP.sha256")"
+HEAD_SHA="$(git rev-parse HEAD)"
+
+# Changelog: commits since the previous release.
+if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+  PREV="$(git describe --tags --abbrev=0 "${HEAD_SHA}^" 2>/dev/null || true)"
+else
+  PREV="$(git tag --list 'v*' --sort=-creatordate | head -n1 || true)"
+fi
+if [ -n "$PREV" ]; then
+  LOG="$(git log --pretty='- %s (%h)' "${PREV}..HEAD")"
+else
+  LOG="$(git log --pretty='- %s (%h)')"
+fi
+CHANGELOG="$(printf '## Changes\n\n%s\n\nSHA-256: `%s`\n' "$LOG" "$SHA256")"
+BODY="$(printf '%s' "$CHANGELOG" | jq -Rs .)"
+
+auth=(-H "Authorization: token ${FORGEJO_TOKEN}")
+
+# Replace an existing release on the same tag (re-runs refresh it).
+OLD_ID="$(curl -fsS "${auth[@]}" "${FORGEJO_API}/releases/tags/${TAG}" 2>/dev/null \
+  | jq -r '.id // empty' || true)"
+if [ -n "$OLD_ID" ]; then
+  curl -fsS -X DELETE "${auth[@]}" "${FORGEJO_API}/releases/${OLD_ID}" || true
+fi
+
+RELEASE_ID="$(curl -fsS -X POST "${auth[@]}" \
+  -H "Content-Type: application/json" \
+  "${FORGEJO_API}/releases" \
+  -d "{\"tag_name\":\"${TAG}\",\"target_commitish\":\"${HEAD_SHA}\",\"name\":\"${TAG}\",\"body\":${BODY},\"draft\":false,\"prerelease\":${PRERELEASE}}" \
+  | jq -r '.id')"
+
+if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "null" ]; then
+  echo "Erreur : création de la release échouée." >&2
+  exit 1
+fi
+
+for f in "$ZIP" "$ZIP.sha256"; do
+  name="$(basename "$f")"
+  curl -fsS -X POST "${auth[@]}" \
+    -F "attachment=@${f}" \
+    "${FORGEJO_API}/releases/${RELEASE_ID}/assets?name=${name}" >/dev/null
+done
+
+echo "Published release ${TAG} (prerelease=${PRERELEASE}) with ${PLUGIN_NAME}.zip"

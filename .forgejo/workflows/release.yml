@@ -1,0 +1,46 @@
+name: release
+
+# Official releases come from git tags `v*` (prerelease = false).
+# Every push to `main` publishes a `snapshot-<sha>` prerelease, which the plugin
+# only installs when the user opts into snapshots.
+#
+# All the project logic lives in the mise-tasks/ scripts (plain bash, runnable
+# locally with `mise run <task>` or directly with `bash mise-tasks/<task>`), so
+# this workflow only bootstraps the runner and calls them — mise is not needed.
+on:
+  push:
+    tags: ['v*']
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: codeberg-small
+    steps:
+      - name: Checkout (full history for the changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install tooling
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            lua5.1 luarocks zip jq curl ca-certificates build-essential libreadline-dev
+          luarocks install luacheck
+          luarocks install busted
+
+      - name: Lint
+        run: bash mise-tasks/lint
+
+      - name: Test
+        run: bash mise-tasks/test
+
+      - name: Build the release artifact
+        run: bash mise-tasks/build
+
+      - name: Publish the release
+        env:
+          # Auto-provisioned by Forgejo Actions; has write access to this repo.
+          FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORGEJO_API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}
+        run: bash mise-tasks/release

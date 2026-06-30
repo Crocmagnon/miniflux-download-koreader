@@ -16,6 +16,7 @@ User-configurable settings:
 --]]
 
 local BD = require("ui/bidi")
+local ConfirmBox = require("ui/widget/confirmbox")
 local DataStorage = require("datastorage")
 local Dispatcher = require("dispatcher")
 local DocSettings = require("docsettings")
@@ -88,6 +89,8 @@ function Miniflux:readSettings()
     self.delete_remotely_read = Helpers.defaultTrue(self.settings:readSetting("delete_remotely_read"))
     self.order = self.settings:readSetting("order") or "published_at"
     self.direction = self.settings:readSetting("direction") or "desc"
+    -- Whether the in-app updater considers snapshot prereleases (off by default).
+    self.include_prereleases = self.settings:readSetting("include_prereleases") or false
 end
 
 function Miniflux:saveSettings()
@@ -101,6 +104,7 @@ function Miniflux:saveSettings()
     self.settings:saveSetting("delete_remotely_read", self.delete_remotely_read)
     self.settings:saveSetting("order", self.order)
     self.settings:saveSetting("direction", self.direction)
+    self.settings:saveSetting("include_prereleases", self.include_prereleases)
     self.settings:flush()
 end
 
@@ -124,6 +128,22 @@ function Miniflux:addToMainMenu(menu_items)
                 text = _("Go to download folder"),
                 callback = function()
                     self:onGoToMinifluxDirectory()
+                end,
+                separator = true,
+            },
+            {
+                text = _("Check for updates"),
+                keep_menu_open = true,
+                callback = function()
+                    -- Lazily required and pcall-guarded so the updater can
+                    -- never affect the core download flow.
+                    local ok, err = pcall(function() self:checkForUpdates() end)
+                    if not ok then
+                        logger.warn("Miniflux: updater error:", err)
+                        UIManager:show(InfoMessage:new{
+                            text = _("Could not check for updates."),
+                        })
+                    end
                 end,
                 separator = true,
             },
@@ -211,6 +231,19 @@ function Miniflux:addToMainMenu(menu_items)
                             self.delete_remotely_read = not self.delete_remotely_read
                             self:saveSettings()
                         end,
+                        separator = true,
+                    },
+                    {
+                        text = _("Include pre-releases (snapshots) when updating"),
+                        help_text = _("When checking for updates, also offer the snapshot pre-releases built from every commit, not just the official tagged releases."),
+                        keep_menu_open = true,
+                        checked_func = function()
+                            return self.include_prereleases
+                        end,
+                        callback = function()
+                            self.include_prereleases = not self.include_prereleases
+                            self:saveSettings()
+                        end,
                     },
                 },
                 separator = true,
@@ -220,14 +253,17 @@ function Miniflux:addToMainMenu(menu_items)
                 keep_menu_open = true,
                 callback = function()
                     UIManager:show(InfoMessage:new{
-                        text = T(_([[The Miniflux Download plugin syncs unread articles from a Miniflux server: it downloads new ones as EPUB files (with images) for offline reading and reconciles read statuses in both directions.
+                        text = T(_([[%1
+
+The Miniflux Download plugin syncs unread articles from a Miniflux server: it downloads new ones as EPUB files (with images) for offline reading and reconciles read statuses in both directions.
 
 Configure the server URL and API token in the settings, then use "Sync articles".
 
 Downloads to:
-%1
+%2
 
 More about Miniflux: https://miniflux.app]]),
+                            self:versionString(),
                             BD.dirpath(filemanagerutil.abbreviate(self.download_dir))),
                     })
                 end,
@@ -645,6 +681,100 @@ function Miniflux:downloadEntries()
         text = table.concat(lines, "\n"),
         timeout = RESULT_TIMEOUT,
     })
+end
+
+-------------------------------------------------------------------------------
+-- Self-update
+-------------------------------------------------------------------------------
+
+-- Human-readable installed version, from the CI-stamped fields in _meta.lua.
+function Miniflux:versionString()
+    local meta = require("_meta")
+    if not meta.version or meta.version == "dev" then
+        return _("Development version (installed from source)")
+    end
+    if type(meta.built_at) == "string" and meta.built_at ~= "" then
+        return T(_("Version %1 (built %2)"), meta.version, meta.built_at:sub(1, 10))
+    end
+    return T(_("Version %1"), meta.version)
+end
+
+-- Translated message for an updater reason keyword (see updater.lua).
+local UPDATER_MESSAGES = {
+    network = _("Could not reach the update server."),
+    parse = _("Could not read the update information."),
+    none = _("No release is available yet."),
+    uptodate = _("The plugin is already up to date."),
+    noasset = _("The latest release has no installable package."),
+}
+
+-- Build the updater, stamped with the installed version so it can tell whether a
+-- release is newer. Required lazily so the core flow never depends on it.
+function Miniflux:getUpdater()
+    local meta = require("_meta")
+    return require("updater"):new{
+        local_version = meta.version,
+        local_built_at = meta.built_at,
+    }
+end
+
+-- Check the server for a newer release and, if found, offer to install it.
+function Miniflux:checkForUpdates()
+    NetworkMgr:runWhenOnline(function()
+        Trapper:wrap(function()
+            Trapper:info(_("Checking for updates…"))
+            local updater = self:getUpdater()
+            local ok, update, reason = pcall(function()
+                return updater:checkForUpdate(self.include_prereleases)
+            end)
+            Trapper:reset()
+            if not ok then
+                logger.warn("Miniflux: update check failed:", update)
+                UIManager:show(InfoMessage:new{ text = _("Could not check for updates.") })
+                return
+            end
+            if not update then
+                UIManager:show(InfoMessage:new{
+                    text = UPDATER_MESSAGES[reason] or _("Could not check for updates."),
+                    timeout = RESULT_TIMEOUT,
+                })
+                return
+            end
+            UIManager:show(ConfirmBox:new{
+                text = T(_("%1 is available.\nInstall it now? You will need to restart KOReader afterwards."),
+                    update.version),
+                ok_text = _("Install"),
+                ok_callback = function()
+                    self:installUpdate(update)
+                end,
+            })
+        end)
+    end)
+end
+
+-- Download and apply an update descriptor, then prompt for a restart.
+function Miniflux:installUpdate(update)
+    NetworkMgr:runWhenOnline(function()
+        Trapper:wrap(function()
+            Trapper:info(_("Downloading update…"))
+            local updater = self:getUpdater()
+            local ok, applied, reason = pcall(function()
+                return updater:applyRelease(update)
+            end)
+            Trapper:reset()
+            if ok and applied then
+                UIManager:show(InfoMessage:new{
+                    text = T(_("Updated to %1.\nPlease restart KOReader to apply the update."),
+                        update.version),
+                })
+            else
+                logger.warn("Miniflux: update install failed:", applied, reason)
+                UIManager:show(InfoMessage:new{
+                    text = _("The update could not be installed. The plugin was left unchanged."),
+                })
+            end
+        end)
+    end)
 end
 
 -------------------------------------------------------------------------------
