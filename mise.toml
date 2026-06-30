@@ -1,0 +1,7 @@
+# Dossier des plugins KOReader sur la liseuse.
+# Surchargeable localement via un mise.local.toml (non versionné) ou une vraie
+# variable d'environnement KOREADER_PLUGINS_DIR.
+[env]
+KOREADER_PLUGINS_DIR = "/run/media/gaugendre/KOBOeReader/.adds/koreader/plugins"
+
+# Les tâches sont définies comme scripts dans le dossier mise-tasks/.

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Synchronise le plugin vers la liseuse (rsync --delete)"
+set -euo pipefail
+
+if [ ! -d "$KOREADER_PLUGINS_DIR" ]; then
+  echo "Erreur : dossier des plugins introuvable ($KOREADER_PLUGINS_DIR). La liseuse est-elle montée ?" >&2
+  exit 1
+fi
+
+rsync -av --delete miniflux-download.koplugin/ "$KOREADER_PLUGINS_DIR/miniflux-download.koplugin/"
