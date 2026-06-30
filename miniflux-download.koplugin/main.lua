@@ -50,8 +50,8 @@ local id_postfix = "] "
 local RESULT_TIMEOUT = 5
 
 local Miniflux = WidgetContainer:extend{
-    name = "miniflux_v2",
-    settings_file = DataStorage:getSettingsDir() .. "/miniflux_v2.lua",
+    name = "miniflux_download",
+    settings_file = DataStorage:getSettingsDir() .. "/miniflux_download.lua",
 }
 
 function Miniflux:init()
@@ -61,16 +61,16 @@ function Miniflux:init()
 end
 
 function Miniflux:onDispatcherRegisterActions()
-    Dispatcher:registerAction("miniflux_v2_download", {
+    Dispatcher:registerAction("miniflux_download_articles", {
         category = "none",
-        event = "SynchronizeMinifluxV2",
-        title = _("Miniflux v2: download unread articles"),
+        event = "SynchronizeMinifluxDownload",
+        title = _("Miniflux Download: download unread articles"),
         general = true,
     })
-    Dispatcher:registerAction("miniflux_v2_upload_statuses", {
+    Dispatcher:registerAction("miniflux_download_upload_statuses", {
         category = "none",
-        event = "UploadMinifluxStatusesV2",
-        title = _("Miniflux v2: upload read statuses"),
+        event = "UploadMinifluxDownloadStatuses",
+        title = _("Miniflux Download: upload read statuses"),
         general = true,
     })
 end
@@ -84,7 +84,7 @@ function Miniflux:readSettings()
     self.server_url = self.settings:readSetting("server_url") or ""
     self.api_token = self.settings:readSetting("api_token") or ""
     self.download_dir = self.settings:readSetting("download_dir")
-        or (DataStorage:getFullDataDir() .. "/miniflux_v2/")
+        or (DataStorage:getFullDataDir() .. "/miniflux_download/")
     self.limit = self.settings:readSetting("limit") or 25
     -- Default to true when never set.
     local inc = self.settings:readSetting("include_images")
@@ -123,21 +123,21 @@ end
 -------------------------------------------------------------------------------
 
 function Miniflux:addToMainMenu(menu_items)
-    menu_items.miniflux_v2 = {
-        text = _("Miniflux v2"),
+    menu_items.miniflux_download = {
+        text = _("Miniflux Download"),
         sorting_hint = "tools",
         sub_item_table = {
             {
                 text = _("Download unread articles"),
                 callback = function()
-                    self.ui:handleEvent(Event:new("SynchronizeMinifluxV2"))
+                    self.ui:handleEvent(Event:new("SynchronizeMinifluxDownload"))
                 end,
             },
             {
                 text = _("Sync read statuses"),
                 help_text = _("Mark articles finished in KOReader as read on the server, and remove local copies of articles that were read on another device."),
                 callback = function()
-                    self.ui:handleEvent(Event:new("UploadMinifluxStatusesV2"))
+                    self.ui:handleEvent(Event:new("UploadMinifluxDownloadStatuses"))
                 end,
             },
             {
@@ -236,11 +236,11 @@ function Miniflux:addToMainMenu(menu_items)
                 separator = true,
             },
             {
-                text = _("About Miniflux v2 plugin"),
+                text = _("About Miniflux Download plugin"),
                 keep_menu_open = true,
                 callback = function()
                     UIManager:show(InfoMessage:new{
-                        text = T(_([[The Miniflux v2 plugin downloads unread articles from a Miniflux server as EPUB files (with images) for offline reading.
+                        text = T(_([[The Miniflux Download plugin downloads unread articles from a Miniflux server as EPUB files (with images) for offline reading.
 
 Configure the server URL and API token in the settings, then use "Download unread articles".
 
@@ -392,7 +392,7 @@ function Miniflux:validateSettings()
     return true
 end
 
-function Miniflux:onSynchronizeMinifluxV2()
+function Miniflux:onSynchronizeMinifluxDownload()
     if not self:validateSettings() then
         return true
     end
@@ -408,7 +408,7 @@ end
 -- Manual trigger: reconcile read statuses in both directions, without
 -- downloading anything new. Pushes finished articles up, and removes local
 -- copies of articles read on another device.
-function Miniflux:onUploadMinifluxStatusesV2()
+function Miniflux:onUploadMinifluxDownloadStatuses()
     if not self:validateSettings() then
         return true
     end

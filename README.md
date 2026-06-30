@@ -1,10 +1,10 @@
-# Miniflux v2 plugin for KOReader
+# Miniflux Download plugin for KOReader
 
 A [KOReader](https://koreader.rocks/) plugin that connects to a self-hosted
 [Miniflux](https://miniflux.app/) server and downloads your unread articles —
 **with their images** — as EPUB files for offline reading.
 
-It registers as **Miniflux v2** with its own settings and download folder, so it
+It registers as **Miniflux Download** with its own settings and download folder, so it
 can be installed alongside any existing Miniflux plugin without conflict.
 
 ## Features
@@ -27,13 +27,13 @@ can be installed alongside any existing Miniflux plugin without conflict.
    - Kobo: `.adds/koreader/plugins/`
    - Kindle: `koreader/plugins/`
    - Desktop / emulator: `koreader/plugins/`
-2. Copy the `miniflux-2.koplugin` directory from this repository into that
+2. Copy the `miniflux-download.koplugin` directory from this repository into that
    `plugins` directory.
 3. Restart KOReader.
 
 ```
 koreader/plugins/
-└── miniflux-2.koplugin/
+└── miniflux-download.koplugin/
     ├── _meta.lua
     ├── api.lua
     ├── epub.lua
@@ -44,7 +44,7 @@ koreader/plugins/
 
 1. In Miniflux, create an API token under **Settings → API Keys → Create a new
    API key**.
-2. In KOReader, open the top menu and go to **Tools → Miniflux v2 → Settings →
+2. In KOReader, open the top menu and go to **Tools → Miniflux Download → Settings →
    Configure Miniflux server** (the menu lives under the wrench/Tools tab, both
    in the file manager and while reading).
 3. Enter:
@@ -52,15 +52,15 @@ koreader/plugins/
      needed).
    - **API token** — the key you created above.
 4. Optionally set the **download folder** and other options in the same Settings
-   menu. The folder defaults to `<KOReader data dir>/miniflux_v2/`.
+   menu. The folder defaults to `<KOReader data dir>/miniflux_download/`.
 
 ## Usage
 
-Open the top menu and choose **Tools → Miniflux v2 → Download unread articles**.
+Open the top menu and choose **Tools → Miniflux Download → Download unread articles**.
 
 KOReader will connect (turning on Wi-Fi if needed), fetch your most recent
 unread articles, build an EPUB for each one (downloading images along the way),
-and save them to the download folder. Use **Tools → Miniflux v2 → Go to download
+and save them to the download folder. Use **Tools → Miniflux Download → Go to download
 folder** to start reading.
 
 ### Read-status sync
@@ -71,7 +71,7 @@ plugin checks which downloaded articles you have finished — i.e. marked as
 server. This happens:
 
 - automatically at the start of every **Download unread articles** run, and
-- on demand via **Tools → Miniflux v2 → Sync read statuses**.
+- on demand via **Tools → Miniflux Download → Sync read statuses**.
 
 If **Delete local copy once marked as read** is enabled (also the default), the
 local EPUB (and its reading-progress sidecar) is removed once the article has
