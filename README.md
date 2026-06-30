@@ -56,7 +56,7 @@ koreader/plugins/
 
 ## Usage
 
-Open the top menu and choose **Tools → Miniflux Download → Download unread articles**.
+Open the top menu and choose **Tools → Miniflux Download → Sync articles**.
 
 KOReader will connect (turning on Wi-Fi if needed), fetch your most recent
 unread articles, build an EPUB for each one (downloading images along the way),
@@ -68,10 +68,7 @@ folder** to start reading.
 When **Mark as read on server once finished** is enabled (the default), the
 plugin checks which downloaded articles you have finished — i.e. marked as
 *finished* or read to 100% in KOReader — and marks them as read on the Miniflux
-server. This happens:
-
-- automatically at the start of every **Download unread articles** run, and
-- on demand via **Tools → Miniflux Download → Sync read statuses**.
+server. This happens at the start of every **Sync articles** run.
 
 If **Delete local copy once marked as read** is enabled (also the default), the
 local EPUB (and its reading-progress sidecar) is removed once the article has
@@ -81,7 +78,7 @@ keep finished articles on the device.
 ### Articles read on another device
 
 When **Delete articles read on another device** is enabled (the default), every
-download and every status sync also checks your downloaded articles against the
+**Sync articles** run also checks your downloaded articles against the
 server. Any article that is no longer unread there — because you read it in the
 Miniflux web UI, on your phone, or anywhere else — has its local copy removed.
 This keeps the two sides in sync in both directions.

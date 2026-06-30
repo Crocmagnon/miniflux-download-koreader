@@ -1,9 +1,11 @@
 --[[--
 Miniflux plugin for KOReader.
 
-Connects to a self-hosted Miniflux server, downloads unread articles as EPUB
-files (with their images embedded) into a configurable folder for offline
-reading, and can optionally mark the downloaded articles as read on the server.
+Connects to a self-hosted Miniflux server and syncs unread articles: it downloads
+new ones as EPUB files (with their images embedded) into a configurable folder for
+offline reading, and reconciles read statuses in both directions — marking articles
+finished in KOReader as read on the server, and removing local copies of articles
+read on another device.
 
 User-configurable settings:
   * Miniflux base URL
@@ -58,13 +60,7 @@ function Miniflux:onDispatcherRegisterActions()
     Dispatcher:registerAction("miniflux_download_articles", {
         category = "none",
         event = "SynchronizeMinifluxDownload",
-        title = _("Miniflux Download: download unread articles"),
-        general = true,
-    })
-    Dispatcher:registerAction("miniflux_download_upload_statuses", {
-        category = "none",
-        event = "UploadMinifluxDownloadStatuses",
-        title = _("Miniflux Download: upload read statuses"),
+        title = _("Miniflux Download: sync articles"),
         general = true,
     })
 end
@@ -118,16 +114,10 @@ function Miniflux:addToMainMenu(menu_items)
         sorting_hint = "tools",
         sub_item_table = {
             {
-                text = _("Download unread articles"),
+                text = _("Sync articles"),
+                help_text = _("Download new unread articles, mark articles finished in KOReader as read on the server, and remove local copies of articles read on another device."),
                 callback = function()
                     self.ui:handleEvent(Event:new("SynchronizeMinifluxDownload"))
-                end,
-            },
-            {
-                text = _("Sync read statuses"),
-                help_text = _("Mark articles finished in KOReader as read on the server, and remove local copies of articles that were read on another device."),
-                callback = function()
-                    self.ui:handleEvent(Event:new("UploadMinifluxDownloadStatuses"))
                 end,
             },
             {
@@ -230,9 +220,9 @@ function Miniflux:addToMainMenu(menu_items)
                 keep_menu_open = true,
                 callback = function()
                     UIManager:show(InfoMessage:new{
-                        text = T(_([[The Miniflux Download plugin downloads unread articles from a Miniflux server as EPUB files (with images) for offline reading.
+                        text = T(_([[The Miniflux Download plugin syncs unread articles from a Miniflux server: it downloads new ones as EPUB files (with images) for offline reading and reconciles read statuses in both directions.
 
-Configure the server URL and API token in the settings, then use "Download unread articles".
+Configure the server URL and API token in the settings, then use "Sync articles".
 
 Downloads to:
 %1
@@ -440,32 +430,6 @@ function Miniflux:onSynchronizeMinifluxDownload()
     return true
 end
 
--- Manual trigger: reconcile read statuses in both directions, without
--- downloading anything new. Pushes finished articles up, and removes local
--- copies of articles read on another device.
-function Miniflux:onUploadMinifluxDownloadStatuses()
-    if not self:validateSettings() then
-        return true
-    end
-    NetworkMgr:runWhenOnline(function()
-        Trapper:wrap(function()
-            local marked = self:uploadReadStatuses(true)
-            local removed = self:deleteRemotelyReadArticles()
-            Trapper:reset()
-            local lines = Helpers.buildResultLines{ marked = marked, removed = removed }
-            if #lines == 0 then
-                table.insert(lines, _("Read statuses are already in sync."))
-            end
-            UIManager:show(InfoMessage:new{
-                text = table.concat(lines, "\n"),
-                timeout = RESULT_TIMEOUT,
-            })
-            self:refreshFileManager()
-        end)
-    end)
-    return true
-end
-
 -- Build a map of entry id -> local EPUB path for everything already downloaded
 -- (recursively, skipping .sdr sidecar folders).
 function Miniflux:getLocalEntries(dir, map)
@@ -507,7 +471,7 @@ end
 -- Mark finished articles as read on the Miniflux server, then optionally delete
 -- their local copies. Must run while online and within a Trapper:wrap context.
 -- Returns the number of articles marked as read.
-function Miniflux:uploadReadStatuses(quiet)
+function Miniflux:uploadReadStatuses()
     if not self.sync_read_status then
         return 0
     end
@@ -522,12 +486,6 @@ function Miniflux:uploadReadStatuses(quiet)
     end
 
     if #read_ids == 0 then
-        if not quiet then
-            UIManager:show(InfoMessage:new{
-                text = _("No finished articles to mark as read."),
-                timeout = RESULT_TIMEOUT,
-            })
-        end
         return 0
     end
 
@@ -607,7 +565,7 @@ end
 function Miniflux:downloadEntries()
     -- First push up the read statuses of articles already finished in KOReader,
     -- so they get marked as read (and possibly removed) before we fetch more.
-    local synced_count = self:uploadReadStatuses(true)
+    local synced_count = self:uploadReadStatuses()
 
     Trapper:info(_("Connecting to Miniflux…"))
 

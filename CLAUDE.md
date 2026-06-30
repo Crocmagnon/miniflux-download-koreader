@@ -46,7 +46,8 @@ These span multiple files and are the things to understand before changing behav
   `helpers.lua` — `entryFilename(id, safe_title)` builds it, `entryIdFromFilename` parses it back. This
   is how the plugin detects already-downloaded articles and reconciles read statuses — don't change the
   naming scheme without updating both ends (the `helpers_spec.lua` round-trip test guards this).
-- **Bidirectional status sync:**
+- **Bidirectional status sync:** both directions run as part of the single **Sync articles** flow
+  (`onSynchronizeMinifluxDownload` → `downloadEntries`); there is no separate status-only menu entry.
   - `uploadReadStatuses` pushes articles *finished in KOReader* up to the server as read. "Finished" is
     read from the `.sdr` sidecar via `DocSettings` (`summary.status == "complete"` or
     `percent_finished == 1`), then optionally deletes the local copy.
