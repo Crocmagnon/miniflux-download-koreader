@@ -40,7 +40,10 @@ jobs:
 
       - name: Publish the release
         env:
-          # Auto-provisioned by Forgejo Actions; has write access to this repo.
-          FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Native Forgejo automatic token (the `secrets.GITHUB_TOKEN` alias can
+          # be empty on Codeberg). Has write access to this repo. If Codeberg
+          # disallows it from creating releases, store a personal access token
+          # (scope write:repository) as a secret and use ${{ secrets.RELEASE_TOKEN }}.
+          FORGEJO_TOKEN: ${{ forgejo.token }}
           FORGEJO_API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}
         run: bash mise-tasks/release

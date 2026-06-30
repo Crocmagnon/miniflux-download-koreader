@@ -46,30 +46,47 @@ CHANGELOG="$(printf '## Changes\n\n%s\n\nSHA-256: `%s`\n' "$LOG" "$SHA256")"
 BODY="$(printf '%s' "$CHANGELOG" | jq -Rs .)"
 
 auth=(-H "Authorization: token ${FORGEJO_TOKEN}")
+echo "Publishing to ${FORGEJO_API} (token length: ${#FORGEJO_TOKEN})"
 
-# Replace an existing release on the same tag (re-runs refresh it).
-OLD_ID="$(curl -fsS "${auth[@]}" "${FORGEJO_API}/releases/tags/${TAG}" 2>/dev/null \
-  | jq -r '.id // empty' || true)"
+# Call the Forgejo API. Prints the response body on success; on HTTP >= 400 it
+# prints method/URL/status/body to stderr and returns non-zero — so a failure is
+# diagnosable instead of an opaque `curl (22)`.
+api() {  # api METHOD PATH [curl-args...]
+  local method="$1" path="$2"; shift 2
+  local resp code body
+  resp="$(curl -sS -w $'\n%{http_code}' -X "$method" "${auth[@]}" "${FORGEJO_API}${path}" "$@")"
+  code="${resp##*$'\n'}"
+  body="${resp%$'\n'*}"
+  if [ "$code" -ge 400 ]; then
+    echo "API $method ${FORGEJO_API}${path} -> HTTP $code" >&2
+    echo "$body" >&2
+    return 1
+  fi
+  printf '%s' "$body"
+}
+
+# Replace an existing release on the same tag (re-runs refresh it). Tolerant:
+# a 404 here just means "no release yet" (no .id in the body).
+OLD_ID="$(curl -sS "${auth[@]}" "${FORGEJO_API}/releases/tags/${TAG}" 2>/dev/null \
+  | jq -r '.id // empty' 2>/dev/null || true)"
 if [ -n "$OLD_ID" ]; then
-  curl -fsS -X DELETE "${auth[@]}" "${FORGEJO_API}/releases/${OLD_ID}" || true
+  api DELETE "/releases/${OLD_ID}" >/dev/null || echo "Warn: could not delete release ${OLD_ID}" >&2
 fi
 
-RELEASE_ID="$(curl -fsS -X POST "${auth[@]}" \
+created="$(api POST /releases \
   -H "Content-Type: application/json" \
-  "${FORGEJO_API}/releases" \
-  -d "{\"tag_name\":\"${TAG}\",\"target_commitish\":\"${HEAD_SHA}\",\"name\":\"${TAG}\",\"body\":${BODY},\"draft\":false,\"prerelease\":${PRERELEASE}}" \
-  | jq -r '.id')"
-
+  -d "{\"tag_name\":\"${TAG}\",\"target_commitish\":\"${HEAD_SHA}\",\"name\":\"${TAG}\",\"body\":${BODY},\"draft\":false,\"prerelease\":${PRERELEASE}}")" \
+  || exit 1
+RELEASE_ID="$(printf '%s' "$created" | jq -r '.id')"
 if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "null" ]; then
-  echo "Erreur : création de la release échouée." >&2
+  echo "Erreur : création de la release échouée (réponse inattendue) :" >&2
+  echo "$created" >&2
   exit 1
 fi
 
 for f in "$ZIP" "$ZIP.sha256"; do
   name="$(basename "$f")"
-  curl -fsS -X POST "${auth[@]}" \
-    -F "attachment=@${f}" \
-    "${FORGEJO_API}/releases/${RELEASE_ID}/assets?name=${name}" >/dev/null
+  api POST "/releases/${RELEASE_ID}/assets?name=${name}" -F "attachment=@${f}" >/dev/null || exit 1
 done
 
 echo "Published release ${TAG} (prerelease=${PRERELEASE}) with ${PLUGIN_NAME}.zip"
