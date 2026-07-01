@@ -11,6 +11,18 @@ coexist with any other Miniflux plugin without conflict.
 
 This is pure Lua running inside the KOReader host application. There is no build step.
 
+## Goals and non-goals
+
+Use these to keep the scope from drifting (see `README.md` for the full phrasing).
+
+- **Goals:** offline-first reading (unread articles → self-contained EPUBs with images); two-way
+  read-status sync (finished in KOReader → read on server; read elsewhere → deleted locally); self-updating
+  from Codeberg releases; being a good KOReader citizen — reuse native mechanisms (EPUBs in a browsable folder, `.sdr`
+  reading statuses, the Tools menu) and adapt existing plugin patterns (`wallabag`, `newsdownloader`).
+- **Non-goals:** being a full Miniflux client (no categories, feeds, starred, history, search); managing
+  subscriptions/feeds; replacing the Miniflux web UI; being a general RSS reader; live/online reading
+  (it's a batch downloader).
+
 ## Commands
 
 - **Lint:** `mise run lint` (runs `luacheck miniflux-download.koplugin/ spec/`) — `.luacheckrc` mirrors

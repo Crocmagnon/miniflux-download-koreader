@@ -15,6 +15,32 @@ can be installed alongside any existing Miniflux plugin without conflict.
 > **If you're an experienced Lua or KOReader developer**, please send feedback!
 > I value yours much more than the output of a stochastic machine.
 
+## Goals and non-goals
+
+### Goals
+
+- **Offline-first reading.** Download your unread Miniflux articles as
+  self-contained EPUBs (images embedded) so you can read them without a
+  connection.
+- **Two-way read-status sync.** Mark articles read on the server once you finish
+  them in KOReader, and drop local copies of articles you read elsewhere.
+- **Self-maintaining.** Update itself in place from the Codeberg releases.
+- **A good KOReader ecosystem citizen.** Lean on native mechanisms instead of
+  reinventing them: produce standard EPUBs in a folder the file manager can
+  browse, rely on KOReader's own reading statuses (`.sdr` sidecars /
+  `DocSettings`) to tell what's finished, live in the Tools menu, and adapt
+  patterns from existing plugins (`wallabag`, `newsdownloader`) rather than
+  invent new ones.
+
+### Non-goals
+
+- **Being a full Miniflux client.** No categories, feeds, starred, history or
+  search.
+- **Managing subscriptions or feeds** from within KOReader.
+- **Replacing the Miniflux web UI** for article management.
+- **Being a general-purpose RSS/news reader** independent of Miniflux.
+- **Live/online reading.** This is a batch downloader, not a connected reader.
+
 ## Features
 
 - Downloads unread articles from Miniflux as self-contained EPUB files.
