@@ -21,6 +21,8 @@ come from git tags `v*` (`prerelease = false`); every push to `main` publishes a
 opts in.
 --]]
 
+local json = require("json")
+
 local MinifluxUpdater = {}
 MinifluxUpdater.__index = MinifluxUpdater
 
@@ -45,12 +47,17 @@ local function default_http_get(url)
 
     local sink = {}
     socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
-    local code = socket.skip(1, http.request{
+    -- On a socket-level failure http.request returns (nil, err): headers is nil
+    -- and `code` holds the error string, so guard on headers like api.lua does.
+    local code, headers = socket.skip(1, http.request{
         url = url,
         method = "GET",
         sink = ltn12.sink.table(sink),
     })
     socketutil:reset_timeout()
+    if headers == nil then
+        return false, nil
+    end
     local body = table.concat(sink)
     if code == 200 then
         return true, body, code
@@ -208,7 +215,6 @@ function MinifluxUpdater:checkForUpdate(include_prereleases)
         return nil, "network", code
     end
 
-    local json = require("json")
     local pok, releases = pcall(json.decode, body)
     if not pok or type(releases) ~= "table" then
         return nil, "parse"
@@ -273,11 +279,13 @@ function MinifluxUpdater:applyRelease(update)
     end
 
     -- 2. Verify the checksum when the release ships one (HTTPS otherwise covers
-    --    transport integrity, so a missing .sha256 asset is not fatal).
+    --    transport integrity, so a missing .sha256 asset is not fatal). When the
+    --    release *does* ship one, fail closed: an unreachable or unparsable
+    --    checksum must not silently install an unverified download.
     if update.sha256_url then
         local sok, sbody = self.http_get(update.sha256_url)
         local expected = sok and sbody and sbody:match("%x+") or nil
-        if expected and self.hash(body) ~= expected then
+        if not expected or self.hash(body) ~= expected then
             return false, "checksum"
         end
     end

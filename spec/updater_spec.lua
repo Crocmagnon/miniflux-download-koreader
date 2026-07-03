@@ -297,6 +297,22 @@ describe("MinifluxUpdater:applyRelease", function()
         assert.is_true(fs.exists(plugin_dir))
     end)
 
+    it("fails closed when a shipped checksum cannot be fetched", function()
+        local fs = fakeFs{ plugin_dir }
+        local up = MinifluxUpdater:new{
+            plugin_dir = plugin_dir,
+            -- zip downloads, but the .sha256 URL is unmapped (404).
+            http_get = fakeHttp{ [update.zip_url] = "ZIPDATA" },
+            hash = function() return "deadbeef" end,
+            extract_zip = extractInto(fs, true),
+            fs = fs,
+        }
+        local ok, reason = up:applyRelease(update) -- update has a sha256_url
+        assert.is_false(ok)
+        assert.equals("checksum", reason)
+        assert.is_true(fs.exists(plugin_dir)) -- live folder untouched
+    end)
+
     it("installs without a checksum asset (HTTPS-only integrity)", function()
         local fs = fakeFs{ plugin_dir }
         local up = MinifluxUpdater:new{
