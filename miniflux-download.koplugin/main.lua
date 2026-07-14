@@ -651,7 +651,8 @@ function Miniflux:downloadEntries()
             local created, reason
             local create_ok, create_err = pcall(function()
                 created, reason = MinifluxEpub:createEpub(epub_path, html,
-                    entry.url or self.server_url, self.include_images, message)
+                    entry.url or self.server_url, self.include_images, message,
+                    entry.feed and entry.feed.title)
             end)
             if create_ok and created then
                 new_count = new_count + 1

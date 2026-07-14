@@ -19,6 +19,7 @@ local time = require("ui/time")
 local util = require("util")
 local _ = require("gettext")
 local T = ffiutil.template
+local Helpers = require("helpers")
 
 local MinifluxEpub = {}
 
@@ -117,9 +118,10 @@ Create an EPUB file from an HTML document.
 @param url        the article's original URL, used to resolve relative image links
 @param include_images  whether to download and embed images
 @param message    progress message prefix (shown above per-image progress)
+@param author     EPUB author (Miniflux feed name); omitted from metadata if empty
 @treturn boolean  true on success, false if cancelled/failed
 --]]
-function MinifluxEpub:createEpub(epub_path, html, url, include_images, message)
+function MinifluxEpub:createEpub(epub_path, html, url, include_images, message, author)
     logger.dbg("MinifluxEpub:createEpub(", epub_path, ")")
     -- Trapper is used to display progress and ask questions through the UI.
     -- We must have been Trapper:wrap()'ed for the UI to be used; otherwise
@@ -266,6 +268,10 @@ function MinifluxEpub:createEpub(epub_path, html, url, include_images, message)
     if include_images and cover_imgid then
         meta_cover = string.format([[<meta name="cover" content="%s"/>]], cover_imgid)
     end
+    local meta_creator = ""
+    if author and author ~= "" then
+        meta_creator = string.format("<dc:creator>%s</dc:creator>", Helpers.xmlEscape(author))
+    end
     table.insert(content_opf_parts, string.format([[
 <?xml version='1.0' encoding='utf-8'?>
 <package xmlns="http://www.idpf.org/2007/opf"
@@ -273,6 +279,7 @@ function MinifluxEpub:createEpub(epub_path, html, url, include_images, message)
         unique-identifier="bookid" version="2.0">
   <metadata>
     <dc:title>%s</dc:title>
+    %s
     <dc:publisher>KOReader %s</dc:publisher>
     %s
   </metadata>
@@ -280,7 +287,7 @@ function MinifluxEpub:createEpub(epub_path, html, url, include_images, message)
     <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
     <item id="content" href="content.html" media-type="application/xhtml+xml"/>
     <item id="css" href="stylesheet.css" media-type="text/css"/>
-]], page_htmltitle, Version:getCurrentRevision(), meta_cover))
+]], page_htmltitle, meta_creator, Version:getCurrentRevision(), meta_cover))
     if include_images then
         for _, img in ipairs(images) do
             table.insert(content_opf_parts, string.format(
