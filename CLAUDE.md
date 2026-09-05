@@ -45,6 +45,11 @@ Modules under `miniflux-download.koplugin/`, deliberately separated by concern:
   `GET /v1/entries/:id`. Authenticates with the `X-Auth-Token` header.
 - `epub.lua` — `MinifluxEpub:createEpub()`, builds an EPUB from an article's HTML and downloads/embeds
   its `<img>` resources. Adapted from KOReader's `newsdownloader.koplugin/epubdownloadbackend.lua`.
+  Images are downloaded **before** `content.opf` and `content.html` are written, so those only ever
+  reference images that actually made it into the zip; the ones that failed are replaced in the HTML
+  by a note (`Helpers.replaceMissingImage`) and counted in the third return value,
+  `{ failed = , total = }`. Never prompt per failed image — failures are reported once at the end of
+  the sync (`Helpers.buildImageFailureLines`).
 - `helpers.lua` — pure, host-independent helpers (filename id encoding/parsing, XML escaping, article
   HTML, API error messages). Isolated here so they can be unit-tested with busted; `gettext` is its
   only host dependency.

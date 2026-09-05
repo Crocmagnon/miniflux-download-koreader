@@ -638,6 +638,9 @@ function Miniflux:downloadEntries()
     local skipped_count = 0
     local failed_count = 0
     local cancelled = false
+    -- { title, failed, total } per article whose images could not all be
+    -- downloaded, reported once in the final summary.
+    local image_failures = {}
 
     for index, entry in ipairs(entries) do
         local message = T(_("Article %1 / %2:\n%3"), index, total,
@@ -648,14 +651,21 @@ function Miniflux:downloadEntries()
         else
             local epub_path = self:getEntryPath(entry)
             local html = Helpers.buildArticleHtml(entry)
-            local created, reason
+            local created, reason, img_stats
             local create_ok, create_err = pcall(function()
-                created, reason = MinifluxEpub:createEpub(epub_path, html,
+                created, reason, img_stats = MinifluxEpub:createEpub(epub_path, html,
                     entry.url or self.server_url, self.include_images, message,
                     entry.feed and entry.feed.title)
             end)
             if create_ok and created then
                 new_count = new_count + 1
+                if img_stats and img_stats.failed > 0 then
+                    table.insert(image_failures, {
+                        title = BD.auto(entry.title or ""),
+                        failed = img_stats.failed,
+                        total = img_stats.total,
+                    })
+                end
             elseif create_ok and reason == "cancelled" then
                 -- User interrupted: stop the whole batch rather than moving on
                 -- to (and downloading) the next article.
@@ -678,6 +688,9 @@ function Miniflux:downloadEntries()
         marked = synced_count,
         removed = removed_count,
     }
+    for _, line in ipairs(Helpers.buildImageFailureLines(image_failures)) do
+        table.insert(lines, line)
+    end
     UIManager:show(InfoMessage:new{
         text = table.concat(lines, "\n"),
         timeout = RESULT_TIMEOUT,

@@ -120,6 +120,8 @@ Create an EPUB file from an HTML document.
 @param message    progress message prefix (shown above per-image progress)
 @param author     EPUB author (Miniflux feed name); omitted from metadata if empty
 @treturn boolean  true on success, false if cancelled/failed
+@treturn string   "cancelled" when the user interrupted the download
+@treturn table    on success, { failed = , total = } image download counts
 --]]
 function MinifluxEpub:createEpub(epub_path, html, url, include_images, message, author)
     logger.dbg("MinifluxEpub:createEpub(", epub_path, ")")
@@ -141,7 +143,7 @@ function MinifluxEpub:createEpub(epub_path, html, url, include_images, message, 
     local images = {}
     local seen_images = {}
     local imagenum = 1
-    local cover_imgid = nil
+    local cover_img = nil
     local matched_tags = 0
 
     local processImg = function(img_tag)
@@ -205,8 +207,8 @@ function MinifluxEpub:createEpub(epub_path, html, url, include_images, message, 
             table.insert(images, cur_image)
             seen_images[src] = cur_image
             -- Use the first reasonably-sized portrait image as the cover.
-            if not cover_imgid and width and width > 50 and height and height > 50 and height > width then
-                cover_imgid = imgid
+            if not cover_img and width and width > 50 and height and height > 50 and height > width then
+                cover_img = cur_image
             end
             imagenum = imagenum + 1
         end
@@ -262,11 +264,89 @@ function MinifluxEpub:createEpub(epub_path, html, url, include_images, message, 
   </rootfiles>
 </container>]], mtime)
 
+    collectgarbage()
+    collectgarbage()
+
+    -- OEBPS/images/* : downloaded before the manifest and content.html below,
+    -- so that those can leave out the images that failed to download.
+    local failed_images = 0
+    if include_images then
+        local nb_images = #images
+        local before_images_time = time.now()
+        local time_prev = before_images_time
+        for inum, img in ipairs(images) do
+            -- The download can be interrupted between images by tapping the
+            -- InfoMessage. We use fast_refresh from image #2 for a quicker UI.
+            local go_on
+            if time.to_ms(time.since(time_prev)) > 1000 then
+                time_prev = time.now()
+                go_on = UI:info((message and message ~= "" and message .. "\n\n" or "")
+                    .. T(_("Retrieving image %1 / %2 …"), inum, nb_images), inum >= 2)
+                if not go_on then
+                    cancelled = true
+                    break
+                end
+            else
+                UI:info((message and message ~= "" and message .. "\n\n" or "")
+                    .. T(_("Retrieving image %1 / %2 …"), inum, nb_images), inum >= 2, true)
+            end
+            local src = img.src
+            local success, content = getUrlContent(src)
+            if success then
+                -- Store binary images uncompressed (they are already
+                -- compressed); SVG is XML text, so deflate is worthwhile.
+                -- Compression is selected via setZipCompression, not an
+                -- argument to addFileFromMemory (which is path, content, mtime).
+                epub:setZipCompression(img.mimetype == "image/svg+xml"
+                    and "deflate" or "store")
+                epub:addFileFromMemory("OEBPS/" .. img.imgpath, content, mtime)
+                img.ok = true
+            else
+                -- Deliberately silent: an article whose images are all
+                -- unreachable would otherwise pop up one dialog per image.
+                -- Failures are reported once, at the end of the whole sync.
+                logger.warn("MinifluxEpub: failed fetching image:", src, "reason:", content)
+                failed_images = failed_images + 1
+            end
+        end
+        logger.dbg("MinifluxEpub: image download time:",
+            time.to_ms(time.since(before_images_time)), "ms",
+            "failed:", failed_images, "/", nb_images)
+    end
+
+    if cancelled then
+        if UI:confirm(_("Download did not complete.\nDo you want to create an EPUB with the already downloaded images?"),
+                _("Don't create"), _("Create")) then
+            cancelled = false
+        end
+    end
+    if cancelled then
+        UI:info(_("Canceled. Cleaning up…"))
+        epub:close()
+        if lfs.attributes(epub_path_tmp, "mode") == "file" then
+            os.remove(epub_path_tmp)
+        end
+        -- Signal a user cancellation distinctly from a failure, so the caller
+        -- can stop the whole batch instead of moving on to the next article.
+        return false, "cancelled"
+    end
+
+    UI:info(T(_("%1\n\nPacking EPUB…"), message))
+    epub:setZipCompression("deflate")
+
+    -- Images missing from the zip (failed, or never reached because the user
+    -- cancelled) would render as an empty square: replace them with a note.
+    for _, img in ipairs(images) do
+        if not img.ok then
+            html = Helpers.replaceMissingImage(html, img.imgpath)
+        end
+    end
+
     -- OEBPS/content.opf : metadata + manifest + spine
     local content_opf_parts = {}
     local meta_cover = "<!-- no cover image -->"
-    if include_images and cover_imgid then
-        meta_cover = string.format([[<meta name="cover" content="%s"/>]], cover_imgid)
+    if include_images and cover_img and cover_img.ok then
+        meta_cover = string.format([[<meta name="cover" content="%s"/>]], cover_img.imgid)
     end
     local meta_creator = ""
     if author and author ~= "" then
@@ -290,9 +370,13 @@ function MinifluxEpub:createEpub(epub_path, html, url, include_images, message, 
 ]], page_htmltitle, meta_creator, Version:getCurrentRevision(), meta_cover))
     if include_images then
         for _, img in ipairs(images) do
-            table.insert(content_opf_parts, string.format(
-                [[    <item id="%s" href="%s" media-type="%s"/>%s]],
-                img.imgid, img.imgpath, img.mimetype, "\n"))
+            -- Only declare what actually made it into the zip: a manifest item
+            -- without a file makes the EPUB invalid.
+            if img.ok then
+                table.insert(content_opf_parts, string.format(
+                    [[    <item id="%s" href="%s" media-type="%s"/>%s]],
+                    img.imgid, img.imgpath, img.mimetype, "\n"))
+            end
         end
     end
     table.insert(content_opf_parts, [[
@@ -338,75 +422,7 @@ function MinifluxEpub:createEpub(epub_path, html, url, include_images, message, 
     -- OEBPS/content.html
     epub:addFileFromMemory("OEBPS/content.html", html, mtime)
 
-    collectgarbage()
-    collectgarbage()
-
-    -- OEBPS/images/*
-    if include_images then
-        local nb_images = #images
-        local before_images_time = time.now()
-        local time_prev = before_images_time
-        for inum, img in ipairs(images) do
-            -- The download can be interrupted between images by tapping the
-            -- InfoMessage. We use fast_refresh from image #2 for a quicker UI.
-            local go_on
-            if time.to_ms(time.since(time_prev)) > 1000 then
-                time_prev = time.now()
-                go_on = UI:info((message and message ~= "" and message .. "\n\n" or "")
-                    .. T(_("Retrieving image %1 / %2 …"), inum, nb_images), inum >= 2)
-                if not go_on then
-                    cancelled = true
-                    break
-                end
-            else
-                UI:info((message and message ~= "" and message .. "\n\n" or "")
-                    .. T(_("Retrieving image %1 / %2 …"), inum, nb_images), inum >= 2, true)
-            end
-            local src = img.src
-            local success, content = getUrlContent(src)
-            if success then
-                -- Store binary images uncompressed (they are already
-                -- compressed); SVG is XML text, so deflate is worthwhile.
-                -- Compression is selected via setZipCompression, not an
-                -- argument to addFileFromMemory (which is path, content, mtime).
-                epub:setZipCompression(img.mimetype == "image/svg+xml"
-                    and "deflate" or "store")
-                epub:addFileFromMemory("OEBPS/" .. img.imgpath, content, mtime)
-            else
-                logger.warn("MinifluxEpub: failed fetching image:", src, "reason:", content)
-                go_on = UI:confirm(T(_("Downloading image %1 failed. Continue anyway?"), inum),
-                    _("Stop"), _("Continue"))
-                if not go_on then
-                    cancelled = true
-                    break
-                end
-            end
-        end
-        logger.dbg("MinifluxEpub: image download time:",
-            time.to_ms(time.since(before_images_time)), "ms")
-    end
-
-    if cancelled then
-        if UI:confirm(_("Download did not complete.\nDo you want to create an EPUB with the already downloaded images?"),
-                _("Don't create"), _("Create")) then
-            cancelled = false
-        end
-    end
-    if cancelled then
-        UI:info(_("Canceled. Cleaning up…"))
-    else
-        UI:info(T(_("%1\n\nPacking EPUB…"), message))
-    end
     epub:close()
-
-    if cancelled then
-        if lfs.attributes(epub_path_tmp, "mode") == "file" then
-            os.remove(epub_path_tmp)
-        end
-        -- Signal a user cancellation distinctly from a failure, so the caller
-        -- can stop the whole batch instead of moving on to the next article.
-        return false, "cancelled"
-    end
 
     if not os.rename(epub_path_tmp, epub_path) then
         logger.warn("MinifluxEpub: failed to rename", epub_path_tmp, "to", epub_path)
@@ -419,7 +435,7 @@ function MinifluxEpub:createEpub(epub_path, html, url, include_images, message, 
 
     collectgarbage()
     collectgarbage()
-    return true
+    return true, nil, { failed = failed_images, total = #images }
 end
 
 return MinifluxEpub

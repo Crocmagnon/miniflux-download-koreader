@@ -93,6 +93,62 @@ describe("Helpers.buildResultLines", function()
     end)
 end)
 
+describe("Helpers.buildImageFailureLines", function()
+    it("returns no lines when nothing failed", function()
+        assert.same({}, Helpers.buildImageFailureLines({}))
+        assert.same({}, Helpers.buildImageFailureLines(nil))
+    end)
+    it("lists each article with its failed/total counts", function()
+        local lines = Helpers.buildImageFailureLines({
+            { title = "First", failed = 20, total = 20 },
+            { title = "Second", failed = 1, total = 4 },
+        })
+        assert.equals(3, #lines)
+        assert.is_truthy(lines[1]:find("Missing images in 2 articles", 1, true))
+        assert.is_truthy(lines[2]:find("First (20/20)", 1, true))
+        assert.is_truthy(lines[3]:find("Second (1/4)", 1, true))
+    end)
+    it("uses the singular form for a single article", function()
+        local lines = Helpers.buildImageFailureLines({
+            { title = "Only", failed = 2, total = 3 },
+        })
+        assert.is_truthy(lines[1]:find("Missing images in 1 article:", 1, true))
+    end)
+    it("caps the list and counts the remainder", function()
+        local failures = {}
+        for i = 1, 8 do
+            table.insert(failures, { title = "Article " .. i, failed = 1, total = 1 })
+        end
+        local lines = Helpers.buildImageFailureLines(failures)
+        -- 1 header + 5 articles + 1 remainder line
+        assert.equals(7, #lines)
+        assert.is_truthy(lines[6]:find("Article 5", 1, true))
+        assert.is_truthy(lines[7]:find("and 3 more", 1, true))
+    end)
+end)
+
+describe("Helpers.replaceMissingImage", function()
+    it("replaces every occurrence of the given image", function()
+        local html = [[<p><img src="images/img00001.jpg" style="" alt=""/>x]]
+            .. [[<img src="images/img00001.jpg" style="" alt=""/></p>]]
+        local out = Helpers.replaceMissingImage(html, "images/img00001.jpg")
+        assert.is_nil(out:find("<img", 1, true))
+        assert.equals(2, select(2, out:gsub("Image unavailable", "")))
+    end)
+    it("leaves the other images untouched", function()
+        local html = [[<img src="images/img00001.jpg" alt=""/><img src="images/img00002.jpg" alt=""/>]]
+        local out = Helpers.replaceMissingImage(html, "images/img00001.jpg")
+        assert.is_truthy(out:find([[<img src="images/img00002.jpg" alt=""/>]], 1, true))
+        assert.equals(1, select(2, out:gsub("<img", "")))
+    end)
+    it("treats the image path as a literal, not a Lua pattern", function()
+        local html = [[<img src="images/img00001.a-b" alt=""/><img src="images/img00001Xa-b" alt=""/>]]
+        local out = Helpers.replaceMissingImage(html, "images/img00001.a-b")
+        assert.is_truthy(out:find([[<img src="images/img00001Xa-b" alt=""/>]], 1, true))
+        assert.equals(1, select(2, out:gsub("<img", "")))
+    end)
+end)
+
 describe("Helpers.buildArticleHtml", function()
     it("includes the title and content", function()
         local html = Helpers.buildArticleHtml({ title = "Hi", content = "<p>Body</p>" })

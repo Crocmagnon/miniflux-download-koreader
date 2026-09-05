@@ -53,6 +53,47 @@ function Helpers.buildResultLines(c)
     return lines
 end
 
+-- How many articles the image-failure summary lists individually before it
+-- collapses the rest into a "…and N more." line.
+local IMAGE_FAILURE_LIST_MAX = 5
+
+-- Build the summary lines listing the articles whose images could not all be
+-- downloaded. `failures` is an array of { title = , failed = , total = }.
+-- Returns an empty array when nothing failed.
+function Helpers.buildImageFailureLines(failures)
+    if not failures or #failures == 0 then
+        return {}
+    end
+    local lines = {
+        T(N_("Missing images in %1 article:",
+             "Missing images in %1 articles:", #failures), #failures),
+    }
+    for index = 1, math.min(#failures, IMAGE_FAILURE_LIST_MAX) do
+        local failure = failures[index]
+        table.insert(lines, T(_("• %1 (%2/%3)"),
+            failure.title, failure.failed, failure.total))
+    end
+    if #failures > IMAGE_FAILURE_LIST_MAX then
+        table.insert(lines, T(_("…and %1 more."), #failures - IMAGE_FAILURE_LIST_MAX))
+    end
+    return lines
+end
+
+-- Escape the Lua pattern magic characters of a literal string.
+local function patternEscape(s)
+    return (s:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%1"))
+end
+
+-- Replace every <img> tag pointing at `imgpath` (an EPUB-internal image path,
+-- e.g. "images/img00001.jpg") with an inline note, for images that could not
+-- be downloaded: without this they render as an empty square.
+function Helpers.replaceMissingImage(html, imgpath)
+    local note = string.format([[<em class="miniflux-missing-image">%s</em>]],
+        _("[Image unavailable]"))
+    local pattern = [[<img src="]] .. patternEscape(imgpath) .. [["[^>]*>]]
+    return (html:gsub(pattern, function() return note end))
+end
+
 -- Prefix/postfix framing the entry id in a downloaded file name.
 Helpers.id_prefix = "[mf-id_"
 Helpers.id_postfix = "] "
