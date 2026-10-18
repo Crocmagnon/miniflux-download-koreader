@@ -17,7 +17,7 @@ PLUGIN_NAME="miniflux-download.koplugin"
 DIST="$ROOT/dist"
 STAGE="$DIST/stage"
 
-# Version / tag / prerelease: from the Forgejo Actions environment when present,
+# Version / tag / prerelease: from the GitHub Actions environment when present,
 # otherwise a local snapshot derived from the current commit.
 BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then

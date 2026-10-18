@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-#MISE description="Publie la release Forgejo depuis dist/ (changelog + assets)"
+#MISE description="Publie la release GitHub depuis dist/ (changelog + assets)"
 set -euo pipefail
 
 # Plain bash so the CI can run it with `bash mise-tasks/release` (no mise needed).
-# Requires the artifacts produced by `build`, plus FORGEJO_TOKEN and FORGEJO_API.
-for tool in curl jq; do
+# Requires the artifacts produced by `build`, plus gh authenticated (GH_TOKEN in CI).
+for tool in gh; do
   command -v "$tool" >/dev/null || {
     echo "Erreur : '$tool' introuvable. Installe-le pour publier la release." >&2
     exit 1
@@ -25,9 +25,6 @@ fi
 # shellcheck disable=SC1091
 . "$DIST/release.env"
 
-: "${FORGEJO_TOKEN:?Définis FORGEJO_TOKEN (token avec accès en écriture au dépôt)}"
-: "${FORGEJO_API:?Définis FORGEJO_API (ex. https://codeberg.org/api/v1/repos/OWNER/REPO)}"
-
 SHA256="$(cat "$ZIP.sha256")"
 HEAD_SHA="$(git rev-parse HEAD)"
 
@@ -43,50 +40,14 @@ else
   LOG="$(git log --pretty='- %s (%h)')"
 fi
 CHANGELOG="$(printf '## Changes\n\n%s\n\nSHA-256: `%s`\n' "$LOG" "$SHA256")"
-BODY="$(printf '%s' "$CHANGELOG" | jq -Rs .)"
 
-auth=(-H "Authorization: token ${FORGEJO_TOKEN}")
-echo "Publishing to ${FORGEJO_API} (token length: ${#FORGEJO_TOKEN})"
+# Replace an existing release on the same tag (re-runs refresh it). Keep the tag:
+# `gh release create` reuses it.
+gh release delete "$TAG" --yes 2>/dev/null || true
 
-# Call the Forgejo API. Prints the response body on success; on HTTP >= 400 it
-# prints method/URL/status/body to stderr and returns non-zero — so a failure is
-# diagnosable instead of an opaque `curl (22)`.
-api() {  # api METHOD PATH [curl-args...]
-  local method="$1" path="$2"; shift 2
-  local resp code body
-  resp="$(curl -sS -w $'\n%{http_code}' -X "$method" "${auth[@]}" "${FORGEJO_API}${path}" "$@")"
-  code="${resp##*$'\n'}"
-  body="${resp%$'\n'*}"
-  if [ "$code" -ge 400 ]; then
-    echo "API $method ${FORGEJO_API}${path} -> HTTP $code" >&2
-    echo "$body" >&2
-    return 1
-  fi
-  printf '%s' "$body"
-}
-
-# Replace an existing release on the same tag (re-runs refresh it). Tolerant:
-# a 404 here just means "no release yet" (no .id in the body).
-OLD_ID="$(curl -sS "${auth[@]}" "${FORGEJO_API}/releases/tags/${TAG}" 2>/dev/null \
-  | jq -r '.id // empty' 2>/dev/null || true)"
-if [ -n "$OLD_ID" ]; then
-  api DELETE "/releases/${OLD_ID}" >/dev/null || echo "Warn: could not delete release ${OLD_ID}" >&2
-fi
-
-created="$(api POST /releases \
-  -H "Content-Type: application/json" \
-  -d "{\"tag_name\":\"${TAG}\",\"target_commitish\":\"${HEAD_SHA}\",\"name\":\"${TAG}\",\"body\":${BODY},\"draft\":false,\"prerelease\":${PRERELEASE}}")" \
-  || exit 1
-RELEASE_ID="$(printf '%s' "$created" | jq -r '.id')"
-if [ -z "$RELEASE_ID" ] || [ "$RELEASE_ID" = "null" ]; then
-  echo "Erreur : création de la release échouée (réponse inattendue) :" >&2
-  echo "$created" >&2
-  exit 1
-fi
-
-for f in "$ZIP" "$ZIP.sha256"; do
-  name="$(basename "$f")"
-  api POST "/releases/${RELEASE_ID}/assets?name=${name}" -F "attachment=@${f}" >/dev/null || exit 1
-done
+prerelease_flag=()
+[ "$PRERELEASE" = true ] && prerelease_flag=(--prerelease)
+gh release create "$TAG" "$ZIP" "$ZIP.sha256" \
+  --target "$HEAD_SHA" --title "$TAG" --notes "$CHANGELOG" "${prerelease_flag[@]}"
 
 echo "Published release ${TAG} (prerelease=${PRERELEASE}) with ${PLUGIN_NAME}.zip"
