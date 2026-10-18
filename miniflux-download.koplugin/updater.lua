@@ -1,6 +1,6 @@
 --[[--
 Self-updater: keeps the plugin up to date by pulling releases published on
-Codeberg/Forgejo by the CI (see .forgejo/workflows/release.yml).
+GitHub by the CI (see .github/workflows/release.yml).
 
 This module is deliberately isolated from the rest of the plugin: nothing in the
 download / status-sync flow requires it. `main.lua` only `require`s it lazily,
@@ -27,7 +27,7 @@ local MinifluxUpdater = {}
 MinifluxUpdater.__index = MinifluxUpdater
 
 -- Repository / release layout. Overridable through :new (handy for tests).
-local API_BASE = "https://codeberg.org/api/v1"
+local API_BASE = "https://api.github.com"
 local OWNER = "Crocmagnon"
 local REPO = "miniflux-download-koreader"
 local PLUGIN_NAME = "miniflux-download.koplugin"
@@ -37,7 +37,7 @@ local ZIP_NAME = PLUGIN_NAME .. ".zip"
 -- Default host seams (lazily required so the module loads outside KOReader)
 -------------------------------------------------------------------------------
 
--- GET a URL, following redirects (Forgejo asset URLs redirect to storage).
+-- GET a URL, following redirects (GitHub asset URLs redirect to storage).
 -- Returns ok, body, code. Mirrors the request pattern used in api.lua.
 local function default_http_get(url)
     local http = require("socket.http")
@@ -208,7 +208,7 @@ Look for an update.
 @treturn number|nil  HTTP status code (on "network")
 --]]
 function MinifluxUpdater:checkForUpdate(include_prereleases)
-    local url = string.format("%s/repos/%s/%s/releases?limit=20&draft=false",
+    local url = string.format("%s/repos/%s/%s/releases?per_page=20",
         self.api_base, self.owner, self.repo)
     local ok, body, code = self.http_get(url)
     if not ok or not body then

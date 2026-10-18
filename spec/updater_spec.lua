@@ -172,6 +172,13 @@ describe("MinifluxUpdater:checkForUpdate", function()
         assert.equals("noasset", reason)
     end)
 
+    it("queries the GitHub releases API", function()
+        local requested
+        local up = MinifluxUpdater:new{ http_get = function(url) requested = url; return false, nil, 500 end }
+        up:checkForUpdate(false)
+        assert.equals("https://api.github.com/repos/Crocmagnon/miniflux-download-koreader/releases?per_page=20", requested)
+    end)
+
     it("reports network when the request fails", function()
         local up = MinifluxUpdater:new{ http_get = function() return false, nil, 500 end }
         local _, reason, code = up:checkForUpdate(false)

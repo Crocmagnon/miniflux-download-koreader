@@ -24,7 +24,7 @@ can be installed alongside any existing Miniflux plugin without conflict.
   connection.
 - **Two-way read-status sync.** Mark articles read on the server once you finish
   them in KOReader, and drop local copies of articles you read elsewhere.
-- **Self-maintaining.** Update itself in place from the Codeberg releases.
+- **Self-maintaining.** Update itself in place from the GitHub releases.
 - **A good KOReader ecosystem citizen.** Lean on native mechanisms instead of
   reinventing them: produce standard EPUBs in a folder the file manager can
   browse, rely on KOReader's own reading statuses (`.sdr` sidecars /
@@ -83,7 +83,7 @@ koreader/plugins/
 ## Updating
 
 Once installed, the plugin can update itself. Open **Tools → Miniflux Download →
-Check for updates**: it fetches the latest release from Codeberg and, if a newer
+Check for updates**: it fetches the latest release from GitHub and, if a newer
 version is available, offers to download and install it in place (restart
 KOReader afterwards to load it). The currently installed version and build date
 are shown under **About Miniflux Download plugin**.
@@ -150,7 +150,7 @@ are left untouched, both locally and on the server.
 - `helpers.lua` — pure, host-independent helpers (filename id encoding, XML
   escaping, article HTML, API error messages), kept separate so they can be
   unit-tested outside KOReader.
-- `updater.lua` — the self-updater: queries the Codeberg release API, then
+- `updater.lua` — the self-updater: queries the GitHub release API, then
   downloads, verifies and swaps in a new copy of the plugin. Kept isolated from
   the download flow (lazily loaded, side effects injected) and unit-tested.
 - `main.lua` — settings, menus and the download orchestration, modelled on
